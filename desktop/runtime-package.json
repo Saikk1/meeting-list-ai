@@ -1,0 +1,5 @@
+{
+  "name": "meeting-assistant-runtime",
+  "private": true,
+  "type": "module"
+}

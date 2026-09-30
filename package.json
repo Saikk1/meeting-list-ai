@@ -1,0 +1,60 @@
+{
+  "name": "meeting-list-ai",
+  "version": "3.0.2",
+  "private": true,
+  "main": "desktop/main.mjs",
+  "description": "会务智办桌面会议助手",
+  "author": "Meeting Assistant",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "install:ci": "npm ci",
+    "dev": "npm run build && node scripts/local-server.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/local-server.mjs",
+    "desktop": "electron .",
+    "desktop:build": "npm run build && node scripts/prepare-desktop.mjs && node scripts/package-desktop.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs && tsx --test tests/*.test.ts",
+    "validate:artifact": "node scripts/build.mjs",
+    "lint": "eslint app scripts tests desktop electron-builder.config.cjs --ignore-pattern dist --ignore-pattern .next",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "fflate": "^0.7.4",
+    "lucide-react": "^1.27.0",
+    "mammoth": "^1.12.0",
+    "next": "16.2.6",
+    "pdfjs-dist": "^6.2.108",
+    "pinyin-pro": "^3.28.2",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@resvg/resvg-wasm": "2.4.0",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "drizzle-kit": "0.31.10",
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "tsx": "^4.23.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module",
+  "displayName": "会务智办｜AI全流程会议助手"
+}

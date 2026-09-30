@@ -1,0 +1,9 @@
+{
+  "name": "meeting-assistant-desktop",
+  "version": "3.0.2",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "description": "会务智办桌面会议助手",
+  "author": "Meeting Assistant"
+}

@@ -1,0 +1,41 @@
+module.exports = {
+  appId: "cn.meetingassistant.desktop",
+  productName: "会务智办",
+  electronVersion: "44.4.5",
+  electronDownload: { cache: `${process.cwd()}/.tmp/desktop-cache/electron` },
+  directories: { app: "desktop", output: "release/desktop", buildResources: "build/desktop" },
+  files: ["main.mjs", "paths.mjs", "package.json", "!node_modules/**/*"],
+  extraResources: [
+    { from: "dist", to: "runtime/dist", filter: ["**/*", "!.openai/**/*"] },
+    {
+      from: "scripts",
+      to: "runtime/scripts",
+      filter: ["local-server.mjs", "local-api.mjs", "local-store.mjs", "seating-schema.mjs", "integration-api.mjs", "integration-provider.mjs"],
+    },
+    { from: "desktop/runtime-package.json", to: "runtime/package.json" },
+  ],
+  asar: true,
+  npmRebuild: false,
+  win: {
+    target: ["nsis", "portable"],
+    icon: "build/desktop/icon.ico",
+    executableName: "MeetingAssistant",
+  },
+  nsis: {
+    artifactName: "会务智办-${version}-安装版.${ext}",
+    oneClick: false,
+    perMachine: false,
+    allowElevation: false,
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: "会务智办",
+    deleteAppDataOnUninstall: false,
+    runAfterFinish: true,
+    installerLanguages: ["zh_CN", "en_US"],
+  },
+  portable: {
+    artifactName: "会务智办-${version}-便携版.${ext}",
+    requestExecutionLevel: "user",
+  },
+};
