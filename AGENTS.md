@@ -9,7 +9,9 @@
 - `scripts/local-api.mjs`、`scripts/local-store.mjs`：会议、通讯录和配置 API / 原子文件存储。
 - `desktop/` 与 `electron-builder.config.cjs`：桌面入口和安装 / 便携打包。
 - `tests/`：Node 和 TypeScript 自动测试。
+- 用户说明见 `docs/user-guide.md`；运行与目录职责见 `docs/development.md`。
 - OA 接口边界见 `docs/oa-integration.md`；发布步骤见 `docs/releases.md`。
+- 当前业务使用本机 JSON 存储，无 D1 / Drizzle 数据库和 ChatGPT 登录依赖。保留 `worker/`、`build/sites-vite-plugin.ts` 与无敏感信息的构建模板，它们仍被 Vinext 编译链使用。
 
 ## 验证
 
@@ -17,6 +19,7 @@ Node.js >=22.13；使用 `npm ci` 安装锁定依赖。
 修改后运行 `npm run lint`、`npm test`。桌面发布使用 `npm run desktop:build`；随后分别运行 `node scripts/test-desktop.mjs` 和追加便携版路径的相同命令。
 源码克隆不包含 `dist`，启动前须构建。无 `.openai/hosting.json` 时自动使用 `hosting.example.json`。
 根 `package.json`、锁文件根版本和 `desktop/package.json` 必须一致。
+安装、构建、校验以 npm / Node 命令为准；不再使用早期 Linux Shell 部署辅助脚本。GitHub 首页只保留下载、快速启动和导航，完整业务说明写入使用指南。
 
 ## 数据与安全边界
 
