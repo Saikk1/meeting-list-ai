@@ -1,8 +1,10 @@
 # 使用指南
 
-[返回仓库首页](../README.md) · [开发与构建](development.md)
+[返回仓库首页](../README.md) · [图文操作手册](operation-manual.md) · [开发与构建](development.md)
 
 适用于 `3.0.2`。软件下载与安装见仓库首页；本指南介绍业务功能、配置和数据边界。
+
+第一次使用建议阅读[带截图的操作手册](operation-manual.md)，按按钮操作；可下载[Word 版](downloads/会务智办操作手册.docx)或[PDF 版](downloads/会务智办操作手册.pdf)。本指南保留详细规则和功能边界，不重复图文步骤。
 
 ## 功能概览
 

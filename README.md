@@ -20,6 +20,7 @@
 
 ## 使用入口
 
+- [带截图的操作手册](docs/operation-manual.md)：按日常办理顺序逐步操作；另提供[Word](docs/downloads/会务智办操作手册.docx)和[PDF](docs/downloads/会务智办操作手册.pdf)下载。
 - [使用指南](docs/user-guide.md)：会议、人员、车辆、名单、座次、后台配置与 AI 设置。
 - [开发与构建](docs/development.md)：源码运行、目录职责、测试和 Windows 打包。
 - [发布记录与检查步骤](docs/releases.md)。

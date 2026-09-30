@@ -1,5 +1,7 @@
 # 开发与构建
 
+图文操作手册维护在 `docs/operation-manual.md`，只使用独立演示环境的实际界面截图。更新截图或保存规则后同步生成下载版：在装有 `reportlab` 和 `python-docx` 的 Python 环境执行 `python docs/tools/build-operation-manual.py --font C:/Windows/Fonts/simhei.ttf` 生成 PDF（`output/pdf/`），执行 `python docs/tools/build-operation-manual.py --format docx` 生成 Word（`docs/downloads/`）。Word 使用 LibreOffice 转换后逐页检查；PDF 也须逐页渲染检查，确认后将最终 PDF 复制到 `docs/downloads/会务智办操作手册.pdf`。非 Windows 环境须传入可用的中文 TrueType 字体。生成器只读取手册和截图，不读取会议、通讯录或密钥。不要提交中间渲染图片或演示数据。
+
 [返回仓库首页](../README.md) · [使用指南](user-guide.md) · [发布检查](releases.md)
 
 ## 技术与运行方式

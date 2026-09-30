@@ -10,6 +10,7 @@
 - `desktop/` 与 `electron-builder.config.cjs`：桌面入口和安装 / 便携打包。
 - `tests/`：Node 和 TypeScript 自动测试。
 - 用户说明见 `docs/user-guide.md`；运行与目录职责见 `docs/development.md`。
+- 图文操作步骤见 `docs/operation-manual.md`，截图位于 `docs/images/manual-v3.0.2/`，Word 与 PDF 位于 `docs/downloads/`。界面或保存规则变化时同时核对在线版和下载版，不把旧截图当作当前功能证据。
 - OA 接口边界见 `docs/oa-integration.md`；发布步骤见 `docs/releases.md`。
 - 当前业务使用本机 JSON 存储，无 D1 / Drizzle 数据库和 ChatGPT 登录依赖。保留 `worker/`、`build/sites-vite-plugin.ts` 与无敏感信息的构建模板，它们仍被 Vinext 编译链使用。
 
@@ -29,6 +30,7 @@ Node.js >=22.13；使用 `npm ci` 安装锁定依赖。
 - `MEETING_ASSISTANT_DATA_DIR` 可指定独立测试数据目录；测试不得复用实际用户目录。
 - `MEETING_ASSISTANT_INTEGRATION_TOKEN` 是可选服务端集成令牌，默认关闭，不进入前端和管理配置。
 - 测试端口与数据覆盖仅用于测试，定义见 `scripts/local-server.mjs`、`desktop/main.mjs`。
+- 操作手册截图使用独立测试数据目录和虚构姓名、单位、车牌；不得截图真实通讯录、用户附件或已填写的 API Key。
 - AI 操作保持白名单与人工确认；会议人员、车辆、正式名单、座次是独立业务对象。
 - 人员必填姓名；单位缺失时可存会议，不能同步通讯录。车辆不绑定人员。
 - 通讯录只按姓名与已配置的精确标准单位关系去重，人工字段优先，不按姓名或模糊单位强制合并。
