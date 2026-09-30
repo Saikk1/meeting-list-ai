@@ -20,3 +20,5 @@ node scripts/test-desktop.mjs "release/desktop/会务智办-3.0.2-便携版.exe"
 ```
 
 测试数据使用独立临时目录，不修改用户业务数据。发布产物为 Windows x64 安装版和单文件便携版；EXE 未配置签名证书，不宣称已数字签名。
+
+GitHub 下载名为 `MeetingAssistant-3.0.2-Setup.exe` 和 `MeetingAssistant-3.0.2-Portable.exe`；本地打包仍使用中文名称，二者内容对应一致。Release 同时提供 SHA-256 校验文件，不将 EXE 提交进源码历史。
