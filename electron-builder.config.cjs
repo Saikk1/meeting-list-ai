@@ -4,7 +4,7 @@ module.exports = {
   electronVersion: "44.4.5",
   electronDownload: { cache: `${process.cwd()}/.tmp/desktop-cache/electron` },
   directories: { app: "desktop", output: "release/desktop", buildResources: "build/desktop" },
-  files: ["main.mjs", "paths.mjs", "package.json", "!node_modules/**/*"],
+  files: ["main.mjs", "paths.mjs", "window-focus.mjs", "input-smoke.mjs", "package.json", "!node_modules/**/*"],
   extraResources: [
     { from: "dist", to: "runtime/dist", filter: ["**/*", "!.openai/**/*"] },
     {
@@ -17,7 +17,7 @@ module.exports = {
   asar: true,
   npmRebuild: false,
   win: {
-    target: ["nsis", "portable"],
+    target: ["nsis"],
     icon: "build/desktop/icon.ico",
     executableName: "MeetingAssistant",
   },
@@ -33,9 +33,5 @@ module.exports = {
     deleteAppDataOnUninstall: false,
     runAfterFinish: true,
     installerLanguages: ["zh_CN", "en_US"],
-  },
-  portable: {
-    artifactName: "会务智办-${version}-便携版.${ext}",
-    requestExecutionLevel: "user",
   },
 };

@@ -3,6 +3,7 @@
 import { AlertTriangle, Save, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { AdminConfig } from "../lib/admin-config";
+import { confirmAction } from "../lib/confirmation";
 import { meetingRoomRequirements } from "../lib/builtin-meeting-rooms";
 import {
   meetingRoomValidationIssues,
@@ -88,10 +89,11 @@ export function MeetingEditor({
     onBusyChange?.(saving);
   }, [onBusyChange, saving]);
 
-  function requestClose() {
+  async function requestClose() {
+    if (saving) return;
     if (
       dirty &&
-      !window.confirm("会议编辑中还有未保存的修改，确定放弃这些修改吗？")
+      !await confirmAction("会议编辑中还有未保存的修改，确定放弃这些修改吗？")
     ) return;
     onClose();
   }

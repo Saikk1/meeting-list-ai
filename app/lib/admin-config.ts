@@ -1,5 +1,6 @@
 import { CHECKLIST_TEMPLATE } from "./meeting-data";
 import { BUILTIN_MEETING_ROOMS, MEETING_ROOM_PRESET_VERSION } from "./builtin-meeting-rooms";
+import { isMeetingRoomTableType } from "./meeting-room-layout";
 
 export type RosterOutputFieldKey =
   | "sequence"
@@ -74,6 +75,7 @@ export type MeetingRoomConfig = {
   location: string;
   areaSqm?: number;
   tableDimensions?: string;
+  tableType?: import("./meeting-room-layout").MeetingRoomTableType;
   capacity: number;
   roomSize: "small" | "large";
   equipment: string[];
@@ -492,6 +494,7 @@ function hasValidBaseConfig(value: unknown) {
           typeof room.location === "string" &&
           (room.areaSqm === undefined || (typeof room.areaSqm === "number" && Number.isFinite(room.areaSqm) && room.areaSqm > 0 && room.areaSqm <= 100000)) &&
           (room.tableDimensions === undefined || (typeof room.tableDimensions === "string" && room.tableDimensions.length <= 120)) &&
+          (room.tableType === undefined || isMeetingRoomTableType(room.tableType)) &&
           typeof room.capacity === "number" &&
           Number.isFinite(room.capacity) &&
           room.capacity >= 0 &&
@@ -620,6 +623,7 @@ function normalizeMeetingRooms(config: AdminConfig) {
   config.meetingRooms = Array.isArray(config.meetingRooms)
     ? config.meetingRooms.map((room) => ({
         ...room,
+        tableType: room.tableType ?? "unconfigured",
         equipment: Array.isArray(room.equipment) ? [...room.equipment] : [],
       }))
     : [];

@@ -4,19 +4,20 @@
 
 ## 下载软件
 
-不开发代码、只使用软件，请打开 [软件下载页（Releases）](https://github.com/Saikk1/meeting-list-ai/releases/tag/v3.0.2)。
+不开发代码、只使用软件，请打开 [软件下载页（Releases）](https://github.com/Saikk1/meeting-list-ai/releases/tag/v3.0.4)。
 
 | 文件 | 用途 |
 | --- | --- |
-| `MeetingAssistant-3.0.2-Setup.exe` | 安装版：安装后通过快捷方式打开 |
-| `MeetingAssistant-3.0.2-Portable.exe` | 免安装版：双击即可运行 |
-| `SHA256SUMS-3.0.2.txt` | 下载文件的 SHA-256 校验值 |
+| `MeetingAssistant-3.0.4-Setup.exe` | 安装程序：安装后通过快捷方式打开 |
+| `SHA256SUMS-3.0.4.txt` | 安装程序的 SHA-256 校验值 |
 
-两个 EXE 都内置运行环境，不需要另装 Node.js。仓库为私有仓库，下载需要已获授权的 GitHub 账号；EXE 尚未数字签名。
+从 `3.0.4` 正式发布起只提供安装版，不再生成或发布便携版。安装程序内置运行环境，不需要另装 Node.js。仓库为私有仓库，下载需要已获授权的 GitHub 账号；EXE 尚未数字签名。
 
-**GitHub 的“Code → Download ZIP”下载的是源代码，不是安装包。** 已发布软件版本为 `3.0.2`；主分支可能包含后续源码整理，不会自动更新发布页的 EXE。
+**GitHub 的“Code → Download ZIP”下载的是源代码，不是安装包。** 软件版本为 `3.0.4`；主分支后续更新不会自动替换已发布的 EXE。
 
-安装版业务数据位于 `%LOCALAPPDATA%\MeetingAssistantAI`；便携版在 EXE 旁的“会务智办数据”目录。便携版迁移到其他电脑时，请连同数据目录一起复制。升级、卸载保留业务数据。
+`3.0.4` 包含[图形化座次工作台](docs/user-guide.md#会议座次编排)、会议室桌型自动带入，以及桌面确认后输入焦点修复。自行构建的安装程序位于 `release/desktop/`；下载页文件名使用上述英文名称。
+
+业务数据位于 `%LOCALAPPDATA%\MeetingAssistantAI`，升级、卸载保留业务数据。旧便携版的数据不会自动迁入安装版，迁移前请保留完整备份；历史 Release 和版本标签不删除、不重写。
 
 ## 使用入口
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { AssistantShell } from "@/app/components/assistant-shell";
+import { confirmAction } from "@/app/lib/confirmation";
 import {
   archiveMeeting,
   createDemoMeeting,
@@ -313,7 +314,7 @@ export default function MeetingsPage() {
 
   async function removeMeeting(meeting: MeetingRecord) {
     if (
-      !window.confirm(
+      !await confirmAction(
         `确定将“${meeting.title || "未命名会议"}”移入回收站吗？之后仍可恢复。`,
       )
     ) {
@@ -349,7 +350,7 @@ export default function MeetingsPage() {
 
   async function removePermanently(meeting: MeetingRecord) {
     if (
-      !window.confirm(
+      !await confirmAction(
         `彻底删除“${meeting.title || "未命名会议"}”后将无法恢复，是否继续？`,
       )
     ) {

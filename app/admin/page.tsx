@@ -34,6 +34,7 @@ import {
   useState,
 } from "react";
 import { AssistantShell } from "../components/assistant-shell";
+import { confirmAction } from "../lib/confirmation";
 import {
   useWorkspaceLocation,
   useWorkspaceTabStatus,
@@ -56,6 +57,7 @@ import {
   splitEditableLines,
 } from "../lib/multiline-list";
 import { ContactsPanel } from "./contacts-panel";
+import { MEETING_ROOM_TABLE_TYPES, type MeetingRoomTableType } from "../lib/meeting-room-layout";
 import { ADMIN_EDIT_SECTIONS, adminSectionDirty, isAdminEditSection, replaceAdminSection, type AdminEditSection } from "../lib/admin-edit-sections";
 
 type SectionId =
@@ -544,8 +546,8 @@ export default function AdminPage() {
     });
   }
 
-  function removeMeetingRoom(id: string) {
-    if (!window.confirm("确定删除这个会议室吗？已有会议中的地点快照不会改变。")) {
+  async function removeMeetingRoom(id: string) {
+    if (!await confirmAction("确定删除这个会议室吗？已有会议中的地点快照不会改变。")) {
       return;
     }
     setDraft((current) => ({
@@ -751,8 +753,8 @@ export default function AdminPage() {
     });
   }
 
-  function removeChecklistItem(id: string) {
-    if (!window.confirm("确定删除这项清单模板吗？发布后仅影响以后新建的会议。")) {
+  async function removeChecklistItem(id: string) {
+    if (!await confirmAction("确定删除这项清单模板吗？发布后仅影响以后新建的会议。")) {
       return;
     }
     setDraft((current) => ({
@@ -1429,6 +1431,11 @@ export default function AdminPage() {
                             </Field>
                             <Field label="会议桌尺寸" hint="按实际报送尺寸填写，不自动推算可坐人数。">
                               <input maxLength={120} value={room.tableDimensions ?? ""} placeholder="例如：3.2m × 1.4m" onChange={(event) => patchMeetingRoom(room.id, { tableDimensions: event.target.value })} />
+                            </Field>
+                            <Field label="会议桌型" hint="座次编排选择此会议室时自动带入对应布局；本次会议仍可临时调整。">
+                              <select aria-label={`${room.name}会议桌型`} value={room.tableType ?? "unconfigured"} onChange={(event) => patchMeetingRoom(room.id, { tableType: event.target.value as MeetingRoomTableType })}>
+                                {Object.entries(MEETING_ROOM_TABLE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                              </select>
                             </Field>
                             <Field label="容纳人数" hint="0 表示未登记；不能仅凭面积或桌子尺寸推算。">
                               <div className="admin-input-suffix">
@@ -2359,9 +2366,9 @@ export default function AdminPage() {
                         className="admin-reset-button"
                         type="button"
                         disabled={saving}
-                        onClick={() => {
+                        onClick={async () => {
                           if (
-                            window.confirm(
+                            await confirmAction(
                               "确定恢复系统默认配置吗？当前配置仍会保留在历史版本中。",
                             )
                           ) {

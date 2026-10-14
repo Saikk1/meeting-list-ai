@@ -7,6 +7,7 @@ import type { ContactInput } from "./contacts";
 import { normalizeMeetingVehicles, type MeetingVehicle } from "./meeting-vehicles";
 import { validateSeatingOptions, validateSeatingPeople } from "../../scripts/seating-schema.mjs";
 import type { SeatingOptions, SeatingPerson } from "./seating";
+import { isMeetingRoomTableType } from "./meeting-room-layout";
 import {
   DEFAULT_ADMIN_CONFIG,
   isAdminConfig,
@@ -927,7 +928,7 @@ function validateConfigTree(
     const object = plainObject(value, path);
     if (!Object.keys(object).length) fail(path, "至少需要包含一个字段");
     const sampleObject = sample as PlainObject;
-    const optionalKeys = /(?:^|\.)meetingRooms\[\d+\]$/.test(path) ? ["areaSqm", "tableDimensions"] : [];
+    const optionalKeys = /(?:^|\.)meetingRooms\[\d+\]$/.test(path) ? ["areaSqm", "tableDimensions", "tableType"] : [];
     exactKeys(
       object,
       partial ? [] : Object.keys(sampleObject).filter((key) => !optionalKeys.includes(key)),
@@ -947,6 +948,9 @@ function validateConfigTree(
     );
   }
   if (typeof sample === "string") {
+    if (/\.meetingRooms\[\d+\]\.tableType$/.test(path) && !isMeetingRoomTableType(value)) {
+      fail(path, "必须是 unconfigured、rectangular、round 或 podium");
+    }
     return stringValue(value, path, { maximum: 10_000 });
   }
   if (typeof sample === "number") {

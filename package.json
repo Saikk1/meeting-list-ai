@@ -1,6 +1,6 @@
 {
   "name": "meeting-list-ai",
-  "version": "3.0.2",
+  "version": "3.0.4",
   "private": true,
   "main": "desktop/main.mjs",
   "description": "会务智办桌面会议助手",

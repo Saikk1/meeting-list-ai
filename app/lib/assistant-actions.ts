@@ -31,7 +31,7 @@ import {
   type AdminConfig,
 } from "./admin-config";
 import { rankRosterRecords } from "./roster-ranking";
-import { generateSeatingPlan } from "./seating";
+import { regenerateSeatingPlan } from "./seating";
 import {
   downloadAssistantRosterXlsx,
   prepareAssistantRosterExport,
@@ -923,7 +923,7 @@ export async function executeConfirmedPlan(
         const current = requireMeeting(stagedById, action.meetingId);
         if (!adminSnapshot || adminSnapshot.revision !== action.expectedConfigRevision) throw new AssistantExecutionError("座次规则配置已变化，请重新生成操作预览", "STALE_ADMIN_CONFIG");
         const participants = action.participants ?? current.seatingPlan?.participants ?? current.attendees.map((person) => ({ id: person.id, name: person.name, unit: person.unit, title: person.title, grade: "", weight: null, party: "auto" as const }));
-        const seatingPlan = generateSeatingPlan(participants, action.options, adminSnapshot.config.rosterRules);
+        const seatingPlan = regenerateSeatingPlan(participants, action.options, adminSnapshot.config.rosterRules, current.seatingPlan);
         stagedById.set(action.meetingId, { ...current, seatingPlan, updatedAt: new Date().toISOString() });
         changedMeetingIds.add(action.meetingId);
         break;

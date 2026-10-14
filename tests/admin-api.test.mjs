@@ -139,6 +139,27 @@ test("installer defaults seed six rooms once and preserve edits/deletions on res
   });
 });
 
+test("room table types persist through save and restart while old rooms remain valid", async () => {
+  await withTemporaryStore(async (directory) => {
+    const defaults = JSON.parse(await readFile(new URL("../dist/default-admin-config.json", import.meta.url), "utf8"));
+    const store = createLocalConfigStore({ dataDirectory: directory });
+    const initial = await store.initializeDefaults(defaults);
+    const config = structuredClone(initial.config);
+    config.meetingRooms[0].tableType = "round";
+    config.meetingRooms[1].tableType = "rectangular";
+    config.meetingRooms[2].tableType = "podium";
+    delete config.meetingRooms[3].tableType;
+    const saved = await store.save({ expectedRevision: initial.revision, summary: "配置会议桌型", config });
+    const restarted = await createLocalConfigStore({ dataDirectory: directory }).initializeDefaults(defaults);
+    assert.deepEqual(restarted.config, saved.config);
+    assert.equal(restarted.config.meetingRooms[0].tableType, "round");
+    const bad = structuredClone(config);
+    bad.meetingRooms[0].tableType = "triangle";
+    await assert.rejects(store.save({ expectedRevision: saved.revision, summary: "非法桌型", config: bad }), /tableType/);
+    assert.equal((await store.getExport()).config.meetingRooms[0].tableType, "round");
+  });
+});
+
 test("default-room upgrade appends missing rooms without changing existing settings and supports rollback", async () => {
   await withTemporaryStore(async (directory) => {
     const defaults = JSON.parse(await readFile(new URL("../dist/default-admin-config.json", import.meta.url), "utf8"));

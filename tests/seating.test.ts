@@ -2,13 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as XLSX from "xlsx";
 import { DEFAULT_ADMIN_CONFIG } from "../app/lib/admin-config";
-import { buildSeatingXlsx, defaultSeatingOptions, effectiveSeatingParty, generateSeatingPlan, parseSeatingTables, parseSeatingText, seatingWeight, swapSeatingPeople, type SeatingPerson, type SeatingOptions } from "../app/lib/seating";
+import { buildSeatingXlsx, defaultSeatingOptions, effectiveSeatingParty, generateSeatingPlan, parseSeatingTables, parseSeatingText, regenerateSeatingPlan, seatingWeight, swapSeatingPeople, toggleSeatingLock, type SeatingPerson, type SeatingOptions } from "../app/lib/seating";
+import { seatingLayout, seatingFitScale } from "../app/lib/seating-layout";
+import { applyMeetingRoomTableType } from "../app/lib/meeting-room-layout";
 import { validateSeatingPlan } from "../scripts/seating-schema.mjs";
 import { executeConfirmedPlan, resolveAssistantNavigationPath } from "../app/lib/assistant-actions";
 import { assistantPlanRequiresConfirmation, parseAssistantPlan } from "../app/lib/assistant-contract";
 import { createMeeting } from "../app/lib/meeting-data";
 
 const rules = DEFAULT_ADMIN_CONFIG.rosterRules;
+test("room table types select general seating templates without inventing counts or changing other rules", () => {
+  const original = { ...defaultSeatingOptions("示例单位"), template: "table-five" as const, door: "top" as const };
+  for (const [tableType, template] of [["rectangular", "table"], ["round", "round"], ["podium", "podium-auto"]] as const) {
+    const result = applyMeetingRoomTableType(original, { tableType });
+    assert.deepEqual(result, { ...original, template });
+    assert.equal(original.template, "table-five");
+  }
+  assert.deepEqual(applyMeetingRoomTableType(original, {}), original);
+  assert.deepEqual(applyMeetingRoomTableType(original, undefined), original);
+  assert.deepEqual(applyMeetingRoomTableType(original, { tableType: "unconfigured" }), original);
+});
 function people(count: number): SeatingPerson[] {
   return Array.from({ length: count }, (_, index) => ({ id: `person-${index}`, name: `人员${index + 1}`, unit: index % 2 ? "客方单位" : "本公司", title: "", grade: "", weight: 1000 - index * 100, party: index % 2 ? "guest" : "host" }));
 }
@@ -132,6 +145,67 @@ test("multi-table import maps each header independently and ignores unrelated ta
   assert.deepEqual(imported.people.map((person) => [person.name, person.unit, person.party]), [["张伟", "本公司", "host"], ["李四", "客单位", "guest"]]);
   assert.equal(new Set(imported.people.map((person) => person.id)).size, 2);
   assert.throws(() => parseSeatingTables([]), /1–200/);
+});
+
+test("old plans remain valid; lock validation rejects empty, unknown and duplicate seats", () => {
+  const plan = generateSeatingPlan(people(4), options(), rules);
+  validateSeatingPlan(plan);
+  assert.throws(() => toggleSeatingLock(plan, "seat-1-0"), /已安排/);
+  assert.throws(() => validateSeatingPlan({ ...plan, lockedSeatIds: ["missing"] }), /锁定/);
+  const id = plan.seats.find((seat) => seat.personId)!.id;
+  assert.throws(() => validateSeatingPlan({ ...plan, lockedSeatIds: [id, id] }), /锁定/);
+  const locked = toggleSeatingLock(plan, id);
+  assert.deepEqual(locked.lockedSeatIds, [id]);
+  assert.equal(plan.lockedSeatIds, undefined);
+  assert.deepEqual(toggleSeatingLock(locked, id).lockedSeatIds, []);
+});
+
+test("locks block swaps in both directions and survive regeneration without duplicate people", () => {
+  const list = people(5);
+  let plan = generateSeatingPlan(list, options(), rules);
+  const target = plan.seats.find((seat) => seat.personId === list[0].id)!;
+  plan = { ...toggleSeatingLock(plan, target.id), roomId: "room-example" };
+  assert.throws(() => swapSeatingPeople(plan, target.id, list[1].id), /锁定/);
+  assert.throws(() => swapSeatingPeople(plan, plan.seats.find((seat) => seat.personId === list[1].id)!.id, list[0].id), /锁定/);
+  const changed = list.map((person, index) => ({ ...person, weight: index * 100 }));
+  const regenerated = regenerateSeatingPlan(changed, options(), rules, plan);
+  assert.equal(regenerated.seats.find((seat) => seat.id === target.id)?.personId, list[0].id);
+  assert.equal(regenerated.roomId, "room-example");
+  assert.deepEqual(regenerated.lockedSeatIds, [target.id]);
+  assert.equal(new Set(regenerated.seats.map((seat) => seat.personId)).size, 5);
+  validateSeatingPlan(regenerated);
+  assert.throws(() => regenerateSeatingPlan(changed, options({ door: "top" }), rules, plan), /先解除锁定/);
+  assert.throws(() => regenerateSeatingPlan(changed.slice(1), options(), rules, plan), /先解锁/);
+  assert.throws(() => regenerateSeatingPlan(changed, options({ template: "podium-wide" }), rules, plan), /先解除锁定/);
+});
+
+test("regeneration retains several locks and rejects changing centered geometry", () => {
+  const plan = generateSeatingPlan(people(4), options({ template: "podium-auto", closeThreshold: 100 }), rules);
+  const locked = toggleSeatingLock(toggleSeatingLock(plan, plan.seats[0].id), plan.seats[1].id);
+  const next = regenerateSeatingPlan(people(4), locked.options, rules, locked);
+  for (const id of locked.lockedSeatIds!) assert.equal(next.seats.find((seat) => seat.id === id)?.personId, locked.seats.find((seat) => seat.id === id)?.personId);
+  assert.throws(() => regenerateSeatingPlan(people(4), { ...locked.options, closeThreshold: 0 }, rules, locked), /先解锁/);
+});
+
+test("canvas geometry preserves centered seats, table facing, front rows and round bounds", () => {
+  const plan = generateSeatingPlan(people(5), options({ rowCapacity: 3 }), rules);
+  const layout = seatingLayout(plan);
+  const front = plan.seats.find((seat) => seat.seatNumber === "1")!;
+  const back = plan.seats.find((seat) => seat.row === 2 && seat.personId)!;
+  assert.equal(layout.points.find((point) => point.id === front.id)?.x, layout.width / 2);
+  assert.ok(layout.points.find((point) => point.id === front.id)!.y > layout.points.find((point) => point.id === back.id)!.y);
+  for (const template of ["table-five", "round"] as const) {
+    const plan = generateSeatingPlan(people(10), options({ template }), rules);
+    const layout = seatingLayout(plan);
+    assert.equal(layout.points.length, plan.seats.length);
+    assert.ok(layout.table);
+    assert.ok(layout.points.every((point) => point.x > 0 && point.x < layout.width && point.y > 0 && point.y < layout.height));
+    if (template === "table-five") {
+      assert.equal(layout.points.find((point) => point.id === plan.seats.find((seat) => seat.row === 1)!.id)?.facing, "down");
+      assert.equal(layout.points.find((point) => point.id === plan.seats.find((seat) => seat.row === 2)!.id)?.facing, "up");
+    }
+  }
+  assert.ok(seatingFitScale(420, 400, layout) < 1);
 });
 test("Excel output groups physical rows and keeps empty seats, titles and evidence", async () => {
   const plan = generateSeatingPlan(people(3), options({ template: "podium-wide" }), rules);

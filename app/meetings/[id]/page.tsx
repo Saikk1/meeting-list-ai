@@ -1,5 +1,7 @@
 "use client";
 
+import { confirmAction } from "../../lib/confirmation";
+
 
 import {
   AlertCircle,
@@ -153,7 +155,7 @@ function statusIcon(status: TaskStatus) {
 
 export default function MeetingDetailPage() {
   const { href, pathname, searchParams } = useWorkspaceLocation();
-  const { config } = useAdminConfig();
+  const { config, loading: adminConfigLoading } = useAdminConfig();
   const meetingId = decodeURIComponent(pathname.split("/").filter(Boolean)[1] ?? "");
   const hydrated = useSyncExternalStore(
     () => () => {},
@@ -928,10 +930,10 @@ export default function MeetingDetailPage() {
       ) : null}
 
       <Activity mode={displayedTab === "seating" ? "visible" : "hidden"}>
-        <SeatingPlanner key={meeting.id} meeting={meeting} config={config} onStatusChange={setSeatingStatus} onSave={async (seatingPlan) => {
+        {adminConfigLoading ? <div className="assistant-loading">正在读取会议室和座次配置…</div> : <SeatingPlanner key={meeting.id} meeting={meeting} config={config} onStatusChange={setSeatingStatus} onSave={async (seatingPlan) => {
           saveMeeting({ ...meeting, seatingPlan, updatedAt: new Date().toISOString() });
           await flushMeetingPersistence();
-        }} />
+        }} />}
       </Activity>
 
       {displayedTab === "vehicles" && meeting.parkingRequired ? (
@@ -940,8 +942,8 @@ export default function MeetingDetailPage() {
             <div><span>独立车辆登记</span><h2>参会车辆</h2></div>
             <div className="meeting-attendee-actions">
               <button className="assistant-button secondary" type="button" disabled={vehicleBusy || vehicleDraft !== null || !meeting.vehicles?.length} onClick={() => void exportVehicles()}>导出车辆清单</button>
-              {vehicleDraft !== null ? <button className="assistant-button secondary" type="button" disabled={vehicleBusy} onClick={() => {
-                if (!window.confirm("确定放弃尚未保存的车辆修改吗？")) return;
+              {vehicleDraft !== null ? <button className="assistant-button secondary" type="button" disabled={vehicleBusy} onClick={async () => {
+                if (!await confirmAction("确定放弃尚未保存的车辆修改吗？")) return;
                 setVehicleDraft(null); setVehicleBaseRevision(null); setVehicleNotice("");
               }}>放弃修改</button> : null}
               <button className="assistant-button primary" type="button" disabled={vehicleBusy || vehicleDraft === null} onClick={() => void saveVehicles()}><Check size={17} />{vehicleBusy ? "正在处理…" : "保存车辆"}</button>

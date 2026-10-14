@@ -4,6 +4,8 @@ import { appendFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { desktopDataPaths } from "./paths.mjs";
+import { createCloseConfirmation, restoreInputFocus } from "./window-focus.mjs";
+import { verifyConfirmationInput } from "./input-smoke.mjs";
 
 const smoke = process.env.MEETING_DESKTOP_SMOKE === "1";
 const paths = desktopDataPaths({
@@ -95,6 +97,8 @@ if (!hasLock) {
       { role: "selectAll", label: "全选" },
     ] },
     { label: "视图", submenu: [
+      { label: "恢复输入焦点", accelerator: "CmdOrCtrl+Shift+F6", click: () => restoreInputFocus(mainWindow) },
+      { type: "separator" },
       { role: "zoomIn", label: "放大" }, { role: "zoomOut", label: "缩小" },
       { role: "resetZoom", label: "实际大小" }, { role: "togglefullscreen", label: "全屏" },
     ] },
@@ -162,17 +166,18 @@ if (!hasLock) {
         openExternal(url);
       }
     });
-    mainWindow.webContents.on("will-prevent-unload", (event) => {
-      const choice = dialog.showMessageBoxSync(mainWindow, {
+    mainWindow.on("focus", () => {
+      if (!mainWindow.webContents.isDestroyed()) mainWindow.webContents.focus();
+    });
+    mainWindow.webContents.on("will-prevent-unload", createCloseConfirmation(mainWindow, (window) =>
+      dialog.showMessageBox(window, {
         type: "question",
         title: "有未保存的内容",
         message: "工作区中还有未保存内容，关闭后将丢失。",
         buttons: ["继续编辑", "放弃并关闭"],
         defaultId: 0,
         cancelId: 0,
-      });
-      if (choice === 1) event.preventDefault();
-    });
+      }), (error) => log(`Close confirmation failed: ${error instanceof Error ? error.name : "unknown"}`)));
     mainWindow.on("closed", () => { mainWindow = undefined; });
     mainWindow.once("ready-to-show", () => {
       if (!smoke) mainWindow.show();
@@ -197,8 +202,10 @@ if (!hasLock) {
       const decisionRoom = configPayload.config?.meetingRooms?.find((room) => room.id === "room-landmark-10f-decision");
       if (builtinRoomCount !== 6 || decisionRoom?.areaSqm !== 42.7 || decisionRoom?.tableDimensions !== "3.2m × 1.4m") throw new Error("安装内置会议室资料缺失。");
       const restoredRoom = decisionRoom.name === "决策室（桌面重启保留测试）";
+      const restoredTableType = decisionRoom.tableType === "round";
       if (!restoredRoom) {
         decisionRoom.name = "决策室（桌面重启保留测试）";
+        decisionRoom.tableType = "round";
         const saved = await fetch(`${readyUrl}/api/admin/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: configPayload.revision, summary: "桌面内置会议室修改保留测试", config: configPayload.config }) });
         if (!saved.ok) throw new Error(`会议室保存失败：${saved.status}`);
       }
@@ -237,7 +244,8 @@ if (!hasLock) {
       }
       const restoredProfile = await mainWindow.webContents.executeJavaScript("localStorage.getItem('desktop-smoke') === 'saved'");
       await mainWindow.webContents.executeJavaScript("localStorage.setItem('desktop-smoke', 'saved')");
-      await reportSmoke({ ok: true, checks, builtinRoomCount, restoredRoom, restoredContact, restoredMeeting, restoredProfile, dataDirectory: paths.root, packaged: app.isPackaged, portable: paths.portable, node: process.versions.node });
+      const inputRecovery = await verifyConfirmationInput(mainWindow, readyUrl);
+      await reportSmoke({ ok: true, checks, inputRecovery, builtinRoomCount, restoredRoom, restoredTableType, restoredContact, restoredMeeting, restoredProfile, dataDirectory: paths.root, packaged: app.isPackaged, portable: paths.portable, node: process.versions.node });
       mainWindow.destroy();
       app.quit();
     }

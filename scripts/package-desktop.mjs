@@ -6,7 +6,7 @@ const cache = resolve(".tmp/desktop-cache");
 await mkdir(cache, { recursive: true });
 const child = spawn(process.execPath, [
   resolve("node_modules/electron-builder/cli.js"),
-  "--config", "electron-builder.config.cjs", "--win", "nsis", "portable", "--x64", "--publish", "never",
+  "--config", "electron-builder.config.cjs", "--win", "nsis", "--x64", "--publish", "never",
 ], {
   env: {
     ...process.env,

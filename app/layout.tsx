@@ -7,6 +7,7 @@ import {
   ActionAssistantProvider,
 } from "./components/action-assistant";
 import { WorkspaceTabsProvider } from "./components/workspace-tabs";
+import { ConfirmationDialog } from "./components/confirmation-dialog";
 
 export const metadata: Metadata = {
   title: "会务智办｜AI全流程会议助手",
@@ -50,6 +51,7 @@ export default function RootLayout({
         <ActionAssistantProvider>
           <WorkspaceTabsProvider>{children}</WorkspaceTabsProvider>
           <ActionAssistantButton floating />
+          <ConfirmationDialog />
         </ActionAssistantProvider>
       </body>
     </html>

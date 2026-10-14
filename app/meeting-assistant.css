@@ -319,6 +319,21 @@
   background: #d94f5f;
 }
 
+.app-confirmation-dialog {
+  width: min(430px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  overflow: auto;
+}
+
+.app-confirmation-dialog::backdrop {
+  background: rgba(18, 38, 58, 0.32);
+  backdrop-filter: blur(5px);
+}
+
+.app-confirmation-dialog p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-confirmation-dialog button:focus-visible { outline: 3px solid #83b8ff; outline-offset: 3px; }
+
 .assistant-page-header {
   min-height: var(--workspace-header-height);
   display: flex;

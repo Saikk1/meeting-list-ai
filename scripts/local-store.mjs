@@ -414,7 +414,7 @@ export function validateAdminConfig(config) {
         "enabled",
       ],
       roomPath,
-      ["areaSqm", "tableDimensions"],
+      ["areaSqm", "tableDimensions", "tableType"],
     );
     assertIdentifier(room.id, `${roomPath}.id`);
     if (meetingRoomIds.has(room.id)) fail(`${roomPath}.id`, "会议室 ID 必须唯一");
@@ -428,6 +428,7 @@ export function validateAdminConfig(config) {
     assertString(room.location, `${roomPath}.location`, 0, 160);
     if (room.areaSqm !== undefined && (typeof room.areaSqm !== "number" || !Number.isFinite(room.areaSqm) || room.areaSqm <= 0 || room.areaSqm > 100000)) fail(`${roomPath}.areaSqm`, "面积必须大于 0 且不超过 100000 平方米");
     if (room.tableDimensions !== undefined) assertString(room.tableDimensions, `${roomPath}.tableDimensions`, 0, 120);
+    if (room.tableType !== undefined) assertEnum(room.tableType, `${roomPath}.tableType`, new Set(["unconfigured", "rectangular", "round", "podium"]));
     assertInteger(room.capacity, `${roomPath}.capacity`, 0, 5000);
     assertEnum(room.roomSize, `${roomPath}.roomSize`, new Set(["small", "large"]));
     if (!Array.isArray(room.equipment) || room.equipment.length > 100) {

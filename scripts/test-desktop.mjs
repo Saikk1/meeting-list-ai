@@ -40,11 +40,13 @@ for (let pass = 1; pass <= 2; pass += 1) {
   assert.equal(report.ok, true, report.error);
   assert.equal(report.packaged, true);
   assert.equal(report.builtinRoomCount, 6, "Packaged defaults must contain six rooms");
+  assert.deepEqual(report.inputRecovery, { cancel: 3, escape: true, confirm: true, textInput: true, textarea: true }, "Input must recover after confirmations in the EXE renderer");
   if (pass === 2) {
     assert.equal(report.restoredContact, true, "Contact was not restored after restart");
     assert.equal(report.restoredMeeting, true, "Meeting was not restored after restart");
     assert.equal(report.restoredProfile, true, "Browser settings were not restored after restart");
     assert.equal(report.restoredRoom, true, "Room edits must be preserved across restarts");
+    assert.equal(report.restoredTableType, true, "Room table type must be preserved across restarts");
   }
   console.log(JSON.stringify({ executable, pass, ...report }));
 }

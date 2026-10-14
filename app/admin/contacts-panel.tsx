@@ -1,5 +1,7 @@
 "use client";
 
+import { confirmAction } from "../lib/confirmation";
+
 import {
   AlertCircle,
   Building2,
@@ -325,7 +327,7 @@ export function ContactsPanel({
 
   async function removeContact(contact: ContactRecord) {
     if (deletingId) return;
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确定删除“${contact.name}（${contact.unit}）”吗？\n\n删除后不会影响已经保存的会议名单。`,
     );
     if (!confirmed) return;

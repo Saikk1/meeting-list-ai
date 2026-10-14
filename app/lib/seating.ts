@@ -16,7 +16,7 @@ export type SeatingOptions = {
   moderatorId: string;
 };
 export type SeatingSeat = { id: string; group: string; row: number; position: number; seatNumber: string; personId: string | null; party: "host" | "guest" | "none"; labels: string[] };
-export type SeatingPlan = { schemaVersion: 1; options: SeatingOptions; participants: SeatingPerson[]; seats: SeatingSeat[]; warnings: string[]; explanation: string; generatedAt: string; manualAdjusted: boolean };
+export type SeatingPlan = { schemaVersion: 1; options: SeatingOptions; participants: SeatingPerson[]; seats: SeatingSeat[]; warnings: string[]; explanation: string; generatedAt: string; manualAdjusted: boolean; lockedSeatIds?: string[]; roomId?: string };
 export const SEATING_TEMPLATE_LABELS: Record<SeatingOptions["template"], string> = {
   "podium-auto": "主席台（自动单/双中心）", "podium-single": "主席台（单中心）", "podium-double": "主席台（双中心）",
   "podium-wide": "主席台（单中心·宽间距）", table: "长方桌会谈（单/双中心）", "table-five": "长方桌会谈（5 对 5）", round: "圆桌 / 宴会式（单主位）",
@@ -169,12 +169,53 @@ export function swapSeatingPeople(plan: SeatingPlan, seatId: string, personId: s
   const target = plan.seats.find((seat) => seat.id === seatId && seat.personId !== null);
   const source = plan.seats.find((seat) => seat.personId === personId);
   if (!target || !source) throw new Error("只可交换已有人员的席位");
+  if (target === source) return plan;
+  if (plan.lockedSeatIds?.includes(target.id) || plan.lockedSeatIds?.includes(source.id)) throw new Error("席位已锁定，请先解锁再交换");
   const seats = plan.seats.map((seat) => seat === target ? { ...seat, personId: source.personId, party: source.party, labels: [...source.labels] }
     : seat === source ? { ...seat, personId: target.personId, party: target.party, labels: [...target.labels] } : { ...seat });
   const warning = "已人工交换席位，主位、主宾位置及主客方朝向可能改变，请会务人员最终确认。";
   const updated = { ...plan, seats, warnings: plan.warnings.includes(warning) ? plan.warnings : [...plan.warnings, warning], manualAdjusted: true, explanation: `${plan.explanation.replace(/；已人工调整席位。$/, "").replace(/。$/, "")}；已人工调整席位。` };
   validateSeatingPlan(updated);
   return updated;
+}
+
+export function toggleSeatingLock(plan: SeatingPlan, seatId: string): SeatingPlan {
+  validateSeatingPlan(plan);
+  if (!plan.seats.some((seat) => seat.id === seatId && seat.personId !== null)) throw new Error("只能锁定已安排人员的席位");
+  const locks = plan.lockedSeatIds ?? [];
+  const next = { ...plan, lockedSeatIds: locks.includes(seatId) ? locks.filter((id) => id !== seatId) : [...locks, seatId] };
+  validateSeatingPlan(next);
+  return next;
+}
+
+// Locks protect physical positions, not rank numbers. Never silently discard an incompatible lock.
+export function regenerateSeatingPlan(people: SeatingPerson[], options: SeatingOptions, rules: RosterRules, previous?: SeatingPlan | null): SeatingPlan {
+  const next = generateSeatingPlan(people, options, rules);
+  if (previous?.roomId !== undefined) next.roomId = previous.roomId;
+  if (!previous?.lockedSeatIds?.length) return next;
+  validateSeatingPlan(previous);
+  if (previous.options.template !== options.template || previous.options.door !== options.door || previous.options.rowCapacity !== options.rowCapacity || previous.options.tableCenter !== options.tableCenter) throw new Error("布局或朝向已改变，请先解除锁定，再重新生成");
+  const locks = previous.lockedSeatIds.map((id) => previous.seats.find((seat) => seat.id === id)!);
+  for (const seat of locks) {
+    const target = next.seats.find((item) => item.id === seat.id);
+    const oldRow = previous.seats.filter((item) => item.row === seat.row);
+    const newRow = next.seats.filter((item) => item.row === seat.row);
+    if (!target || target.personId === null || oldRow.length !== newRow.length || !next.participants.some((person) => person.id === seat.personId)) throw new Error("人员或中心布局变化使锁定位置不兼容，请先解锁后生成");
+    if (options.template === "round" && previous.participants.length !== next.participants.length) throw new Error("圆桌人数变化，请先解锁后生成");
+  }
+  const lockedPeople = new Set(locks.map((seat) => seat.personId));
+  const available = next.seats.filter((seat) => seat.personId !== null && !lockedPeople.has(seat.personId));
+  const payloads = new Map(next.seats.filter((seat) => seat.personId !== null).map((seat) => [seat.personId, seat]));
+  const seats = next.seats.map((seat) => {
+    if (seat.personId === null) return seat;
+    const lock = locks.find((item) => item.id === seat.id);
+    const person = lock ? payloads.get(lock.personId)! : available.shift()!;
+    return { ...seat, personId: person.personId, party: person.party, labels: [...person.labels] };
+  });
+  const result = { ...next, seats, lockedSeatIds: [...previous.lockedSeatIds], manualAdjusted: true,
+    warnings: [...next.warnings, "已保留锁定人员的物理席位；主位、主宾和所属方朝向请再次核对。"] };
+  validateSeatingPlan(result);
+  return result;
 }
 
 export async function buildSeatingXlsx(plan: SeatingPlan) {
@@ -190,7 +231,7 @@ export async function buildSeatingXlsx(plan: SeatingPlan) {
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   sheet["!cols"] = [18, 8, 14, 40, 20, 14, 10, 22].map((wch) => ({ wch }));
   XLSX.utils.book_append_sheet(workbook, sheet, "座次表");
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["排座依据", plan.explanation], ["模板", SEATING_TEMPLATE_LABELS[plan.options.template]], ["本公司", plan.options.hostCompany], ["门的位置", plan.options.door === "bottom" ? "图下方" : "图上方"], ...plan.warnings.map((warning) => ["核对提醒", warning])]), "依据与提醒");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["排座依据", plan.explanation], ["模板", SEATING_TEMPLATE_LABELS[plan.options.template]], ["本公司", plan.options.hostCompany], ["门的位置", plan.options.door === "bottom" ? "图下方" : "图上方"], ["锁定席位", plan.seats.filter((seat) => plan.lockedSeatIds?.includes(seat.id)).map((seat) => `${seat.seatNumber}号 ${people.get(seat.personId ?? "")?.name ?? ""}`).join("、")], ...plan.warnings.map((warning) => ["核对提醒", warning])]), "依据与提醒");
   return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }
 

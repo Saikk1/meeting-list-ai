@@ -69,12 +69,12 @@ def decorate(canvas, doc):
         canvas.setFont("ManualCN", 8.5)
         canvas.setFillColor(MUTED)
         canvas.drawString(MARGIN, HEIGHT - 28, "会务智办  |  图文操作手册")
-        canvas.drawRightString(WIDTH - MARGIN, HEIGHT - 28, "3.0.2")
+        canvas.drawRightString(WIDTH - MARGIN, HEIGHT - 28, "3.0.4")
         canvas.setStrokeColor(colors.HexColor("#D9E4EE"))
         canvas.line(MARGIN, HEIGHT - 35, WIDTH - MARGIN, HEIGHT - 35)
     canvas.setFillColor(MUTED)
     canvas.setFont("ManualCN", 8)
-    canvas.drawString(MARGIN, 23, "演示截图不含真实业务数据  ·  2026-09-30")
+    canvas.drawString(MARGIN, 23, "演示截图不含真实业务数据  ·  2026-10-14")
     canvas.drawRightString(WIDTH - MARGIN, 23, str(doc.page))
     canvas.restoreState()
 
@@ -97,7 +97,7 @@ def build(output, font):
     raw = SOURCE.read_text(encoding="utf-8")
     parts = re.split(r"^## (.+)$", raw, flags=re.M)
     doc = ManualDoc(str(output), pagesize=A4, leftMargin=MARGIN, rightMargin=MARGIN,
-                    topMargin=51, bottomMargin=43, title="会务智办操作手册 3.0.2",
+                    topMargin=51, bottomMargin=43, title="会务智办操作手册 3.0.4",
                     author="会务智办", pageCompression=1)
     doc.addPageTemplates([PageTemplate(id="Manual", frames=Frame(
         MARGIN, 43, CONTENT_WIDTH, HEIGHT - 94, leftPadding=0, rightPadding=0,
@@ -222,7 +222,7 @@ def build_word(output):
             element.getparent().remove(element)
     properties = document.core_properties
     properties.title = "会务智办操作手册"
-    properties.subject = "3.0.2 图文操作步骤"
+    properties.subject = "3.0.4 会务与座次工作台 图文操作步骤"
     properties.author = "会务智办"
     properties.last_modified_by = "会务智办"
 
@@ -237,12 +237,12 @@ def build_word(output):
     parts = re.split(r"^## (.+)$", SOURCE.read_text(encoding="utf-8"), flags=re.M)
     document.add_paragraph("会务智办操作手册", "Title")
     document.add_paragraph("会议安排  人员名单  车辆登记  座次编排  会务跟进")
-    document.add_paragraph("适用版本 3.0.2    编写日期 2026-09-30")
-    for paragraph in parts[0].split("\n\n")[3:]:
+    document.add_paragraph("3.0.4    更新日期 2026-10-14")
+    for paragraph in parts[0].split("\n\n")[2:]:
         if paragraph.strip():
             text(document.add_paragraph(), paragraph.replace("\n", " "))
-    document.add_page_break()
-    document.add_paragraph("目录", "Heading 1")
+    contents_heading = document.add_paragraph("目录", "Heading 1")
+    contents_heading.paragraph_format.page_break_before = True
     for index in range(1, len(parts), 2):
         p = document.add_paragraph()
         p.paragraph_format.space_after = Pt(3)
@@ -257,8 +257,8 @@ def build_word(output):
         p._p.append(anchor)
 
     for index in range(1, len(parts), 2):
-        document.add_page_break()
         heading = document.add_paragraph(re.sub(r"[.：:]+", " ", parts[index]), "Heading 1")
+        heading.paragraph_format.page_break_before = True
         start, end = OxmlElement("w:bookmarkStart"), OxmlElement("w:bookmarkEnd")
         start.set(qn("w:id"), str(index))
         start.set(qn("w:name"), "chapter_" + str(index))
@@ -279,6 +279,10 @@ def build_word(output):
                 p.paragraph_format.keep_with_next = True
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 shape = p.add_run().add_picture(str(SOURCE.parent / filename), width=Inches(6.5))
+                image_height = Inches(3.1 if filename.endswith("room-table-config.png") else 3.7)
+                if shape.height > image_height:
+                    shape.width = int(shape.width * image_height / shape.height)
+                    shape.height = image_height
                 shape._inline.docPr.set("descr", alt)
                 caption_p = document.add_paragraph(alt, "Caption")
                 caption_p.alignment = WD_ALIGN_PARAGRAPH.CENTER

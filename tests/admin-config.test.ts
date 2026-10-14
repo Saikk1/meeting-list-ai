@@ -31,8 +31,24 @@ test("assistant room configuration accepts old rooms without optional area metad
   const room = cloneAdminConfig().meetingRooms[0];
   delete room.areaSqm;
   delete room.tableDimensions;
+  delete room.tableType;
   const plan = parseAssistantPlan({ schemaVersion: 1, summary: "修改会议室", clarification: null, warnings: [], actions: [{ type: "admin.config.patch", expectedRevision: 1, summary: "兼容旧房间", patch: { meetingRooms: [room] } }] });
   assert.equal(plan.actions[0].type, "admin.config.patch");
+});
+
+test("room table types are optional, validated, and accepted by assistant configuration patches", () => {
+  const config = cloneAdminConfig();
+  assert.ok(config.meetingRooms.every((room) => room.tableType === "unconfigured"));
+  for (const tableType of ["rectangular", "round", "podium", "unconfigured"] as const) {
+    const room = { ...config.meetingRooms[0], tableType };
+    assert.equal(isAdminConfig({ ...config, meetingRooms: [room] }), true);
+    assert.equal(parseAssistantPlan({ schemaVersion: 1, summary: "配置桌型", clarification: null, warnings: [], actions: [{ type: "admin.config.patch", expectedRevision: 1, summary: "配置桌型", patch: { meetingRooms: [room] } }] }).actions[0].type, "admin.config.patch");
+  }
+  assert.equal(isAdminConfig({ ...config, meetingRooms: [{ ...config.meetingRooms[0], tableType: "triangle" }] }), false);
+  assert.throws(() => parseAssistantPlan({ schemaVersion: 1, summary: "错误桌型", clarification: null, warnings: [], actions: [{ type: "admin.config.patch", expectedRevision: 1, summary: "错误桌型", patch: { meetingRooms: [{ ...config.meetingRooms[0], tableType: "triangle" }] } }] }), /tableType/);
+  const legacyRoom = { ...config.meetingRooms[0] };
+  delete legacyRoom.tableType;
+  assert.equal(cloneAdminConfig({ ...config, meetingRooms: [legacyRoom] }).meetingRooms[0].tableType, "unconfigured");
 });
 
 test("client import guard rejects nested incomplete configuration", () => {

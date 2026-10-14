@@ -1,5 +1,7 @@
 "use client";
 
+import { confirmAction } from "../lib/confirmation";
+
 import {
   AlertCircle,
   ArrowLeft,
@@ -1974,7 +1976,7 @@ export default function RosterTool({
     if (
       sourceMode === "import" &&
       currentMeeting.attendees.length &&
-      !window.confirm(
+      !await confirmAction(
         `保存后将用当前 ${sortedRecords.length} 人替换会议中已有的 ${currentMeeting.attendees.length} 人。是否继续？`,
       )
     ) {

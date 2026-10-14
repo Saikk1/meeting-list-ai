@@ -6,7 +6,7 @@
 
 ## 技术与运行方式
 
-React 19.2 / TypeScript 页面通过 Vinext + Vite 构建；`scripts/local-server.mjs` 提供本机网页和 API。Electron 包装同一套预编译页面与本机服务，生成 Windows x64 安装版和便携版。
+React 19.2 / TypeScript 页面通过 Vinext + Vite 构建；`scripts/local-server.mjs` 提供本机网页和 API。Electron 包装同一套预编译页面与本机服务，仅生成 Windows x64 NSIS 安装程序。
 
 会议、通讯录和后台配置由 `scripts/local-store.mjs` 保存为本机 JSON 文件，使用原子写入与备份恢复。当前业务没有使用 D1 / Drizzle 数据库，也没有 ChatGPT 登录系统。
 
@@ -34,7 +34,7 @@ npm start
 | `npm run lint` | 检查代码 |
 | `npm test` | 重新构建，再运行 Node 和 TypeScript 测试 |
 | `npm run desktop` | 开发环境打开桌面入口；先完成构建 |
-| `npm run desktop:build` | 构建并生成 Windows 安装版、便携版 |
+| `npm run desktop:build` | 构建并生成 Windows 安装程序，不生成便携版 |
 | `npm run validate:artifact` | 兼容入口，与生产构建及校验相同 |
 
 构建与验证统一使用上述 npm / Node 入口。早期要求 Linux `flock`、GNU `timeout` 的 Shell 辅助脚本已经移除，不需要 Bash。
@@ -42,7 +42,9 @@ npm start
 ## 目录与代码入口
 
 - `app/meetings/`、`app/tasks/`、`app/lists/`、`app/admin/`：会议、待办、名单和后台页面。
-- `app/components/`：人员、车辆、会议编辑器、座次、智能助手和工作区。
+- `app/components/`：人员、车辆、会议编辑器、座次、智能助手和工作区。座次由 `seating-planner.tsx` 管理草稿/60 步撤销历史，`seating-canvas.tsx` 管理图上交互，`app/lib/seating-layout.ts` 提供与真实场地尺寸无关的展示坐标。
+
+座次方案沿用 `schemaVersion: 1`，可选新增 `lockedSeatIds` 与 `roomId`，旧数据无需迁移。锁定仅允许已有人员的有效席位；`regenerateSeatingPlan` 统一保护手动与助手重排，布局不兼容时拒绝写入。参考会议室不改变会议预订，容量只使用已登记值。人员/规则修改保留旧预览但阻止陈旧方案保存；页面状态继续由工作区统一保护。
 - `app/lib/`：共享业务规则、数据模型及前端存储桥接。
 - `app/api/`：AI 提取、助手、排序分析和搜索接口。
 - `scripts/local-server.mjs`：服务入口、静态文件和本机访问限制。
@@ -51,6 +53,8 @@ npm start
 - `scripts/build.mjs`、`scripts/prepare-default-config.ts`：生产构建和内置配置生成。
 - `scripts/prepare-desktop.mjs`、`scripts/package-desktop.mjs`：桌面资源与打包。
 - `desktop/main.mjs`、`desktop/paths.mjs`、`electron-builder.config.cjs`：桌面生命周期、数据路径及分发清单。
+- `app/lib/confirmation.ts` 与根布局的 `confirmation-dialog.tsx`：异步确认队列和 HTML 模态窗口，禁止业务页面再调用 `window.confirm/alert/prompt`。窗口位于保活页签外，取消/Escape 不执行操作，关闭后恢复可见原控件焦点。
+- `desktop/window-focus.mjs`：退出草稿确认不阻塞主进程，取消恢复窗口和渲染页焦点；同一次确认中的重复关闭不再叠加窗口。`desktop/input-smoke.mjs` 仅显式测试模式触发，在隔离数据里通过键盘事件检查确认后输入，不读取真实用户资料。
 - `tests/`：业务、API、页面渲染、本机运行器和存储的自动测试。
 
 ### 为什么仍保留构建平台文件
@@ -77,10 +81,9 @@ npm test
 ```bash
 npm run desktop:build
 node scripts/test-desktop.mjs
-node scripts/test-desktop.mjs "release/desktop/会务智办-3.0.2-便携版.exe"
 ```
 
-输出在 `release/desktop/`，不提交 Git。Windows x64 构建和桌面验证应在 Windows 上执行；未配置签名证书时不得标称已签名。
+输出在 `release/desktop/`，安装程序为 `会务智办-3.0.4-安装版.exe`，不提交 Git；上传 Release 时命名 `MeetingAssistant-3.0.4-Setup.exe`。配置和命令均只选择 NSIS，回归测试禁止重新加入便携目标。旧便携包可能仍保留在本机忽略目录中，不代表新版本分发内容。Windows x64 构建和桌面验证应在 Windows 上执行；未配置签名证书时不得标称已签名。
 
 根 `package.json`、锁文件根版本、`desktop/package.json` 三处版本保持一致。更改版本时同步说明及测试命令里的 EXE 名称。发布步骤见 [发布记录](releases.md#发布验证)。
 

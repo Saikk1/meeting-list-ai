@@ -1,8 +1,8 @@
 export const SEATING_TEMPLATES = ["podium-auto", "podium-single", "podium-double", "podium-wide", "table", "table-five", "round"];
 
-function object(value, keys, path) {
+function object(value, keys, path, optional = []) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${path} 必须为对象`);
-  if (Object.keys(value).some((key) => !keys.includes(key)) || keys.some((key) => !Object.hasOwn(value, key))) throw new Error(`${path} 字段不完整或包含未知字段`);
+  if (Object.keys(value).some((key) => !keys.includes(key) && !optional.includes(key)) || keys.some((key) => !Object.hasOwn(value, key))) throw new Error(`${path} 字段不完整或包含未知字段`);
 }
 function text(value, maximum, path, required = false) {
   if (typeof value !== "string" || value.length > maximum || (required && !value.trim())) throw new Error(`${path} 格式不正确`);
@@ -41,7 +41,8 @@ export function validateSeatingPeople(value) {
 }
 
 export function validateSeatingPlan(value) {
-  object(value, ["schemaVersion", "options", "participants", "seats", "warnings", "explanation", "generatedAt", "manualAdjusted"], "座次表");
+  object(value, ["schemaVersion", "options", "participants", "seats", "warnings", "explanation", "generatedAt", "manualAdjusted"], "座次表", ["lockedSeatIds", "roomId"]);
+  if (value.roomId !== undefined) text(value.roomId, 200, "编排参考会议室");
   if (value.schemaVersion !== 1 || typeof value.manualAdjusted !== "boolean") throw new Error("座次表版本无效");
   validateSeatingOptions(value.options);
   validateSeatingPeople(value.participants);
@@ -74,5 +75,6 @@ export function validateSeatingPlan(value) {
     } else if (seat.seatNumber || seat.party !== "none" || seat.labels.length) throw new Error("空席不可绑定人员或角色");
   });
   if (assigned.size !== people.size) throw new Error("有参会人员尚未分配座位");
+  if (value.lockedSeatIds !== undefined && (!Array.isArray(value.lockedSeatIds) || value.lockedSeatIds.length > 200 || new Set(value.lockedSeatIds).size !== value.lockedSeatIds.length || value.lockedSeatIds.some((id) => typeof id !== "string" || !value.seats.some((seat) => seat.id === id && seat.personId !== null)))) throw new Error("锁定席位无效或重复");
   return value;
 }
