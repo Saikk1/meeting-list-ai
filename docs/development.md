@@ -1,8 +1,20 @@
 # 开发与构建
 
-图文操作手册维护在 `docs/operation-manual.md`，只使用独立演示环境的实际界面截图。更新截图或保存规则后同步生成下载版：在装有 `reportlab` 和 `python-docx` 的 Python 环境执行 `python docs/tools/build-operation-manual.py --font C:/Windows/Fonts/simhei.ttf` 生成 PDF（`output/pdf/`），执行 `python docs/tools/build-operation-manual.py --format docx` 生成 Word（`docs/downloads/`）。Word 使用 LibreOffice 转换后逐页检查；PDF 也须逐页渲染检查，确认后将最终 PDF 复制到 `docs/downloads/会务智办操作手册.pdf`。非 Windows 环境须传入可用的中文 TrueType 字体。生成器只读取手册和截图，不读取会议、通讯录或密钥。不要提交中间渲染图片或演示数据。
+## 全局交互入口
 
-[返回仓库首页](../README.md) · [使用指南](user-guide.md) · [发布检查](releases.md)
+`app/components/quick-navigation.tsx` 在 `WorkspaceTabsProvider` 内单实例挂载，侧栏/页签栏通过事件打开，Ctrl/Command+K 在无打开模态窗口时响应。功能与工作区匹配规则在 `app/lib/quick-navigation.ts`；会议从现有本机快照筛选；不访问文字模型、不新建索引和数据副本。未保存列表使用现有工作区 dirty/dirtyReasons 真值，不标记或保存草稿。
+
+`app-dialog.tsx` 提供原生模态、Escape、正文锁滚与焦点恢复，用于快速打开、页签关闭和会议编辑；业务确认仍由 `ConfirmationDialog` 单队列处理，可叠在编辑窗口上。`app-feedback.tsx` 接收静态成功提示，调用点必须在本机持久化成功后触发，不把错误冒充成功；手工保存规则不变。`experience.css` 维护共享焦点、筛选反馈、固定表单操作区和窄屏样式。会议校验定位以 form 内的 name 查找，不命中隐藏的其他保活页面。UX 回归用 `.tmp/ux-validation-data/` 的虚构会议，覆盖键盘快速打开、未保存关闭取消、首个错误定位、嵌套确认与 390×700 窗口。
+
+## 已移除的资料模块
+
+2026-10-20 按用户要求移除智能纪要，包括页面、会议页签、录音及文档导入、生成问答、模型安装、后台队列、接口和构建资源。名单治理与助手填报共用的 `business-document-reader.ts`、PDF/OCR 保留。业务数据目录中已存在的 `minutes/` 和 `speech/` 不做清理，程序不再读取；若需要备份，退出服务后复制整个业务数据目录。
+
+旧会议任务的 `minutesSource` 仅在类型与存储校验中兼容，任务内容、负责人、期限、状态照常保存，不再显示来源入口。会议 revision 与 expectedRevision 并发校验继续使用；旧数据缺省版本 0，后续保存递增，冲突保留前端修改。
+
+## 图文操作手册
+
+`docs/operation-manual.md` 为在线步骤源，`docs/tools/build-operation-manual.py --format docx` 生成 Word，`--format pdf --output docs/downloads/会务智办操作手册.pdf --font 中文字体路径` 生成 PDF。图片只使用独立测试目录的虚构资料；正文、截图或功能变化后同步下载版并渲染检查。生成器只读取手册与图片，不读取业务数据。中间渲染文件放在忽略目录。
 
 ## 技术与运行方式
 
@@ -69,10 +81,13 @@ npm start
 
 ```bash
 npm run lint
+npm run typecheck
 npm test
 ```
 
 测试覆盖配置迁移、会议与通讯录存储、助手操作确认、待办、名单排序/导出、座次、工作区，以及不依赖 `node_modules` 的预编译运行环境。测试模型接口使用本机模拟服务，不需要真实 API Key。
+
+`npm test` 与 `npm run desktop:build` 均先执行完整 TypeScript 检查；类型错误会直接停止后续构建。Worker 模板声明自身实际使用的资源接口，不依赖未安装的 Cloudflare 全局类型或 D1 绑定。
 
 测试必须使用独立目录或 `MEETING_ASSISTANT_DATA_DIR`，不得复用用户真实数据目录。详见 [数据边界](user-guide.md#数据边界) 与 [OA 认证配置](oa-integration.md#运行与认证)。
 
@@ -83,11 +98,24 @@ npm run desktop:build
 node scripts/test-desktop.mjs
 ```
 
-输出在 `release/desktop/`，安装程序为 `会务智办-3.0.4-安装版.exe`，不提交 Git；上传 Release 时命名 `MeetingAssistant-3.0.4-Setup.exe`。配置和命令均只选择 NSIS，回归测试禁止重新加入便携目标。旧便携包可能仍保留在本机忽略目录中，不代表新版本分发内容。Windows x64 构建和桌面验证应在 Windows 上执行；未配置签名证书时不得标称已签名。
+桌面验证必须实际启动沙箱化渲染器并完成两次测试，不能以 HTTP 检查替代。受限自动执行账户可能报 GPU 子进程 `0xC0000135` 或渲染器 `launch-failed/49`；后者表示无法创建 Chromium 所需受限令牌。诊断脚本会给出日志路径和正常 Windows 用户终端的验证指引，仍以失败退出，不跳过断言、不关闭渲染沙箱。临时软件渲染诊断不进入发行配置。
+
+当前源码输出在 `release/desktop/`，安装程序为 `会务智办-3.1.4-安装版.exe`，不提交 Git；正式发布时命名 `MeetingAssistant-3.1.4-Setup.exe`。历史发布保持不变。配置和命令均只选择 NSIS，回归测试禁止重新加入便携目标。旧便携包可能仍保留在本机忽略目录中，不代表新版本分发内容。Windows x64 构建和桌面验证应在 Windows 上执行；未配置签名证书时不得标称已签名。
 
 根 `package.json`、锁文件根版本、`desktop/package.json` 三处版本保持一致。更改版本时同步说明及测试命令里的 EXE 名称。发布步骤见 [发布记录](releases.md#发布验证)。
 
 已发布的安装包不会随主分支更新自动变化；源码整理与软件发版分开记录。
+
+## 会议方案与助手页面上下文
+
+- `business-data-events.ts` 为通讯录与后台配置提供可订阅版本号。通讯录所有成功写入（含会议同步、替换和撤销）统一通知；配置发布、回滚、助手修改和撤销都通知 `useAdminConfig`。页面使用 `useSyncExternalStore`，Activity 恢复时也能发现隐藏期间的更新；重读不卸载已加载编辑器，旧请求不覆盖新响应，失败保留上次配置。
+- 编辑器使用上次采用的数据作为草稿基线，不能把新服务器快照误当成原草稿基线；干净时采用最新版本，存在人工修改时保留草稿并阻止冲突覆盖。会议基本信息弹窗不以更新时间作为组件 key。
+- `app/lib/meeting-plan.ts` 管理模板数据、来源差异和选择同步；`meeting-plan-export.ts` 使用 `public/templates/meeting-plan.docx` 的样式段落生成可编辑 Word，不包含模板中的真实参会数据。
+- `scripts/meeting-plan-schema.mjs` 在浏览器与本机存储共用校验；方案随会议保存，继续使用会议 API 的 expectedRevision。
+- `use-assistant-workspace.ts` 注册可见工作区的草稿、允许字段和操作模式；助手请求捕获工作区及版本，采用时重新校验。React Activity 隐藏的工作区不接受写入。
+- AI 会话独立保留对话；模型设置共用。同一次会话跟随当前业务页面，附件、未保存草稿、待确认操作及请求状态不跨刷新恢复；聊天历史的持久化规则见下一项。
+- `assistant-conversations.ts` 将聊天记录白名单保存到浏览器 localStorage 的 `meeting-list-ai:assistant-conversations:v1`，恢复会话列表、标题和当前选择；不持久化附件、草稿、API 配置、执行计划和生成状态。此项更新替代此前 AI 会话仅在内存保留的规则，业务工作区草稿仍不跨刷新恢复。恢复的历史会话按需挂载，避免一次打开所有历史助手。
+- `assistant-error-boundary.tsx` 隔离单个助手会话的渲染异常；`desktop/renderer-health.mjs` 记录技术诊断标记及渲染进程退出原因。日志不收集普通控制台内容、提示词、模型回复或密钥；重新加载及重建会话均需用户明确操作。
 
 ## 不上传的文件
 

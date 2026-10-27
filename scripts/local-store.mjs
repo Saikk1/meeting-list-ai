@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { validateSeatingPlan } from "./seating-schema.mjs";
+import { validateMeetingPlan } from "./meeting-plan-schema.mjs";
 
 const SCHEMA_VERSION = 1;
 const ADMIN_CONFIG_SCHEMA_VERSION = 2;
@@ -1966,7 +1967,7 @@ function validateStoredMeetingTask(task, path) {
       "attachments",
     ],
     path,
-    ["sopImages"],
+    ["sopImages", "minutesSource"],
   );
   assertMeetingIdentifier(task.id, `${path}.id`);
   assertMeetingIdentifier(task.templateId, `${path}.templateId`);
@@ -1982,6 +1983,14 @@ function validateStoredMeetingTask(task, path) {
   assertString(task.owner, `${path}.owner`, 0, 120);
   assertString(task.dueDate, `${path}.dueDate`, 0, 40);
   assertString(task.note, `${path}.note`, 0, 20_000);
+  if (task.minutesSource !== undefined) {
+    // Preserve previously imported tasks after the recording module was removed.
+    const source = task.minutesSource;
+    assertPlainObject(source, `${path}.minutesSource`);
+    assertExactKeys(source, ["recordId", "versionId", "actionId", "title"], `${path}.minutesSource`);
+    for (const key of ["recordId", "versionId", "actionId"]) assertMeetingIdentifier(source[key], `${path}.minutesSource.${key}`);
+    assertString(source.title, `${path}.minutesSource.title`, 1, 200);
+  }
   if (!Array.isArray(task.attachments) || task.attachments.length > 1_000) {
     fail(`${path}.attachments`, "必须是最多包含 1000 项的数组");
   }
@@ -2045,6 +2054,7 @@ function validateStoredMeeting(meeting, index) {
       "deletedAt",
       "vehicles",
       "seatingPlan",
+      "meetingPlan",
     ],
   );
   assertMeetingIdentifier(meeting.id, `${path}.id`);
@@ -2073,6 +2083,9 @@ function validateStoredMeeting(meeting, index) {
   assertBoolean(meeting.alcoholRequired, `${path}.alcoholRequired`);
   assertBoolean(meeting.parkingRequired, `${path}.parkingRequired`);
   assertInteger(meeting.vehicleCount, `${path}.vehicleCount`, 0, 5_000);
+  if (meeting.meetingPlan !== undefined) {
+    try { validateMeetingPlan(meeting.meetingPlan); } catch (error) { fail(`${path}.meetingPlan`, error.message); }
+  }
   if (meeting.seatingPlan !== undefined) {
     try { validateSeatingPlan(meeting.seatingPlan); } catch (error) {
       fail(`${path}.seatingPlan`, error instanceof Error ? error.message : "座次表无效");
@@ -2171,7 +2184,9 @@ function validateMeetingsState(state) {
     state,
     ["schemaVersion", "updatedAt", "meetings"],
     "meetingsState",
+    ["revision"],
   );
+  if (state.revision !== undefined) assertInteger(state.revision, "meetingsState.revision", 0, Number.MAX_SAFE_INTEGER);
   if (state.schemaVersion !== MEETINGS_SCHEMA_VERSION) {
     throw new LocalConfigError("会议数据文件版本不受支持", {
       code: "MEETINGS_CORRUPTED",
@@ -2307,14 +2322,16 @@ export function createLocalMeetingStore({
   async function getSnapshot() {
     await writeQueue;
     const { state } = await loadUnsafe();
-    return clone(state);
+    return { ...clone(state), revision: state.revision ?? 0 };
   }
 
-  async function replaceAll({ meetings }) {
+  async function replaceAll({ meetings, expectedRevision }) {
     return enqueue(async () => {
-      const { source } = await loadUnsafe();
+      const { source, state: current } = await loadUnsafe();
+      if (expectedRevision !== undefined && expectedRevision !== (current.revision ?? 0)) throw new LocalConfigError("会议数据已更新，请重新读取；当前修改仍保留在页面", { code: "REVISION_CONFLICT", status: 409 });
       const state = {
         schemaVersion: MEETINGS_SCHEMA_VERSION,
+        revision: (current.revision ?? 0) + 1,
         updatedAt: now().toISOString(),
         meetings: clone(meetings),
       };

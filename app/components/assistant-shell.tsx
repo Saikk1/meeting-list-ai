@@ -8,9 +8,11 @@ import {
   ListChecks,
   Settings,
   Sparkles,
+  Search,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useWorkspaceLocation, WorkspaceTabBar } from "./workspace-tabs";
+import { openQuickNavigation } from "./quick-navigation";
 
 type AssistantShellProps = {
   children: ReactNode;
@@ -120,6 +122,15 @@ export function AssistantShell({
     <div className="assistant-shell">
       <aside className="assistant-sidebar">
         <AssistantBrand />
+        <button
+          className="assistant-quick-open"
+          type="button"
+          onClick={() => openQuickNavigation()}
+        >
+          <Search size={16} />
+          <span>搜索与快速打开</span>
+          <kbd>Ctrl K</kbd>
+        </button>
         <AssistantNavigation pathname={pathname} variant="desktop" />
         <p className="assistant-sidebar__footer">
           本机单用户 · 业务数据本机保存 · AI调用按配置发送
@@ -129,6 +140,14 @@ export function AssistantShell({
       <div className="assistant-mobile-header">
         <div className="assistant-mobile-brand-row">
           <AssistantBrand />
+          <button
+            className="assistant-mobile-search"
+            type="button"
+            aria-label="搜索与快速打开"
+            onClick={() => openQuickNavigation()}
+          >
+            <Search size={20} />
+          </button>
         </div>
         <AssistantNavigation pathname={pathname} variant="mobile" />
       </div>

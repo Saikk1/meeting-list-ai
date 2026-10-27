@@ -69,12 +69,12 @@ def decorate(canvas, doc):
         canvas.setFont("ManualCN", 8.5)
         canvas.setFillColor(MUTED)
         canvas.drawString(MARGIN, HEIGHT - 28, "会务智办  |  图文操作手册")
-        canvas.drawRightString(WIDTH - MARGIN, HEIGHT - 28, "3.0.4")
+        canvas.drawRightString(WIDTH - MARGIN, HEIGHT - 28, "3.1.4")
         canvas.setStrokeColor(colors.HexColor("#D9E4EE"))
         canvas.line(MARGIN, HEIGHT - 35, WIDTH - MARGIN, HEIGHT - 35)
     canvas.setFillColor(MUTED)
     canvas.setFont("ManualCN", 8)
-    canvas.drawString(MARGIN, 23, "演示截图不含真实业务数据  ·  2026-10-14")
+    canvas.drawString(MARGIN, 23, "演示截图不含真实业务数据  ·  2026-10-27")
     canvas.drawRightString(WIDTH - MARGIN, 23, str(doc.page))
     canvas.restoreState()
 
@@ -91,13 +91,13 @@ def build(output, font):
     caption = ParagraphStyle("Caption", parent=body, fontSize=8.5, leading=13,
                              textColor=MUTED, alignment=1, spaceAfter=12)
     cell = ParagraphStyle("Cell", parent=body, fontSize=9, leading=15, spaceAfter=0)
-    toc_style = ParagraphStyle("Contents", parent=body, fontSize=10, leading=20,
+    toc_style = ParagraphStyle("Contents", parent=body, fontSize=10, leading=16,
                               leftIndent=0, firstLineIndent=0, spaceAfter=1)
 
     raw = SOURCE.read_text(encoding="utf-8")
     parts = re.split(r"^## (.+)$", raw, flags=re.M)
     doc = ManualDoc(str(output), pagesize=A4, leftMargin=MARGIN, rightMargin=MARGIN,
-                    topMargin=51, bottomMargin=43, title="会务智办操作手册 3.0.4",
+                    topMargin=51, bottomMargin=43, title="会务智办操作手册 3.1.4",
                     author="会务智办", pageCompression=1)
     doc.addPageTemplates([PageTemplate(id="Manual", frames=Frame(
         MARGIN, 43, CONTENT_WIDTH, HEIGHT - 94, leftPadding=0, rightPadding=0,
@@ -222,7 +222,7 @@ def build_word(output):
             element.getparent().remove(element)
     properties = document.core_properties
     properties.title = "会务智办操作手册"
-    properties.subject = "3.0.4 会务与座次工作台 图文操作步骤"
+    properties.subject = "3.1.4 会务与座次工作台 图文操作步骤"
     properties.author = "会务智办"
     properties.last_modified_by = "会务智办"
 
@@ -237,7 +237,7 @@ def build_word(output):
     parts = re.split(r"^## (.+)$", SOURCE.read_text(encoding="utf-8"), flags=re.M)
     document.add_paragraph("会务智办操作手册", "Title")
     document.add_paragraph("会议安排  人员名单  车辆登记  座次编排  会务跟进")
-    document.add_paragraph("3.0.4    更新日期 2026-10-14")
+    document.add_paragraph("3.1.4    更新日期 2026-10-27")
     for paragraph in parts[0].split("\n\n")[2:]:
         if paragraph.strip():
             text(document.add_paragraph(), paragraph.replace("\n", " "))
@@ -279,7 +279,8 @@ def build_word(output):
                 p.paragraph_format.keep_with_next = True
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 shape = p.add_run().add_picture(str(SOURCE.parent / filename), width=Inches(6.5))
-                image_height = Inches(3.1 if filename.endswith("room-table-config.png") else 3.7)
+                # Keep the expanded attendee instructions together with their screenshot.
+                image_height = Inches(3.1 if index == 9 or filename.endswith(("room-table-config.png", "manual-ux/quick-navigation.png")) else 3.7)
                 if shape.height > image_height:
                     shape.width = int(shape.width * image_height / shape.height)
                     shape.height = image_height
@@ -333,6 +334,14 @@ def build_word(output):
             else:
                 p = document.add_paragraph()
                 text(p, line[2:] if line.startswith("> ") else line)
+                if index == 9:
+                    p.paragraph_format.space_after = Pt(5)
+                    p.paragraph_format.line_spacing = 1.15
+                elif index >= 49:
+                    p.paragraph_format.space_after = Pt(5)
+                    p.paragraph_format.line_spacing = 1.15
+                    for run in p.runs:
+                        run.font.size = Pt(10.5)
             pos += 1
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT

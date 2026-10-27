@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { adminConfigChanges } from "./business-data-events";
 import {
   cloneAdminConfig,
   DEFAULT_ADMIN_CONFIG,
@@ -51,12 +52,15 @@ function normalizePayload(value: unknown): AdminConfigState {
 }
 
 export function useAdminConfig() {
-  const initializedRef = useRef(false);
+  const requestSequence = useRef(0);
+  const changeRevision = useSyncExternalStore(adminConfigChanges.subscribe, adminConfigChanges.getSnapshot, adminConfigChanges.getServerSnapshot);
   const [state, setState] = useState<AdminConfigState>(FALLBACK_STATE);
   const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setError("");
     try {
@@ -67,33 +71,38 @@ export function useAdminConfig() {
         throw new Error(`读取配置失败（${response.status}）`);
       }
       const next = normalizePayload(await response.json());
-      setState(next);
+      if (sequence === requestSequence.current) {
+        setState(next);
+        setReady(true);
+      }
       return next;
     } catch (requestError) {
       const message =
         requestError instanceof Error
           ? requestError.message
           : "读取配置失败";
-      setError(message);
-      setState(FALLBACK_STATE);
+      if (sequence === requestSequence.current) setError(message);
       return null;
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (initializedRef.current) return;
     const timer = window.setTimeout(() => {
-      initializedRef.current = true;
       void reload();
     }, 0);
-    return () => window.clearTimeout(timer);
-  }, [reload]);
+    return () => {
+      window.clearTimeout(timer);
+      requestSequence.current += 1;
+    };
+  }, [reload, changeRevision]);
 
   return {
     ...state,
-    loading,
+    loading: loading && !ready,
+    refreshing: loading && ready,
+    ready,
     error,
     reload,
   };

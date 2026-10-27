@@ -24,7 +24,9 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
+import { contactsChanges } from "../lib/business-data-events";
 import {
   createContact,
   deleteContact,
@@ -87,6 +89,7 @@ export function ContactsPanel({
   const unitInputId = useId();
   const unitListboxId = useId();
   const requestSequence = useRef(0);
+  const contactsRevision = useSyncExternalStore(contactsChanges.subscribe, contactsChanges.getSnapshot, contactsChanges.getServerSnapshot);
   const historicalSyncStateRef = useRef<"idle" | "running" | "complete">("idle");
   const { config: adminConfig } = useAdminConfig();
   const [ready, setReady] = useState(false);
@@ -210,7 +213,8 @@ export function ContactsPanel({
       signal: controller.signal,
     })
       .then((result) => {
-        if (requestSequence.current !== sequence) return;
+        if (controller.signal.aborted || requestSequence.current !== sequence) return;
+        setListError("");
         setPayload(result);
         const lastPage = Math.max(0, Math.ceil(result.total / PAGE_SIZE) - 1);
         if (page > lastPage) setPage(lastPage);
@@ -224,7 +228,7 @@ export function ContactsPanel({
       });
 
     return () => controller.abort();
-  }, [page, query, ready, reloadKey]);
+  }, [page, query, ready, reloadKey, contactsRevision]);
 
   function openCreateEditor() {
     setNotice(null);

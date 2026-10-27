@@ -40,6 +40,7 @@ const RESPONSE_TEMPLATE = {
 };
 
 const ACTION_CATALOGUE = `
+- page.workspace.apply: {"type":"page.workspace.apply","workspaceId":"来自 pageWorkspace.id","expectedRevision":来自 pageWorkspace.revision 的整数,"mode":"draft|save|download|save_download","patch":{只含 pageWorkspace.editableFields 开放字段；数组使用保留未修改条目的完整数组；仅保存/下载时可为空}}。必须独占计划。
 - meeting.create_from_draft: {"type":"meeting.create_from_draft","draft":{部分会议字段}}
 - meeting.update_fields: {"type":"meeting.update_fields","meetingId":"来自上下文","expectedUpdatedAt":"来自上下文","patch":{允许修改的会议字段}}
 - meeting.delete: {"type":"meeting.delete","meetingId":"来自上下文","expectedUpdatedAt":"来自上下文"}
@@ -223,6 +224,7 @@ export async function POST(request: Request) {
         rosterWorkspaceAvailable: rosterWorkspace.available,
         rosterWorkspaceRevision: rosterWorkspace.revision,
         documentMeetingDraft: documents.length > 0,
+        pageWorkspace: context.pageWorkspace,
       });
     } catch (firstError) {
       content = await requestModelResponse(config, modelInput, {
@@ -238,6 +240,7 @@ export async function POST(request: Request) {
           rosterWorkspaceAvailable: rosterWorkspace.available,
           rosterWorkspaceRevision: rosterWorkspace.revision,
           documentMeetingDraft: documents.length > 0,
+        pageWorkspace: context.pageWorkspace,
         });
       } catch (secondError) {
         return noStoreJson(

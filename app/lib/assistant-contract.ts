@@ -1,3 +1,4 @@
+import { parseWorkspaceAction, type AssistantWorkspaceAction } from "./assistant-workspace";
 import type {
   MeetingAttendee,
   MeetingInput,
@@ -222,6 +223,7 @@ export type AssistantAdminConfigPatchAction = {
 export type AssistantRosterWorkspaceAction = RosterWorkspaceCommand;
 
 export type AssistantAction =
+  | AssistantWorkspaceAction
   | AssistantNavigateAction
   | AssistantCreateMeetingAction
   | AssistantUpdateMeetingFieldsAction
@@ -635,7 +637,7 @@ function parseMeetingInput(
   return input;
 }
 
-function parseMeetingPatch(
+export function parseMeetingPatch(
   value: unknown,
   path: string,
 ): AssistantMeetingPatch {
@@ -1037,6 +1039,8 @@ function parseAction(value: unknown, path: string): AssistantAction {
   });
 
   switch (type) {
+    case "page.workspace.apply":
+      try { return parseWorkspaceAction(object); } catch (error) { fail(path, error instanceof Error ? error.message : "页面操作无效"); }
     case "navigate": {
       exactKeys(object, ["type", "destination"], ["meetingId"], path);
       const destination = enumValue(
@@ -1482,6 +1486,7 @@ function parseAction(value: unknown, path: string): AssistantAction {
 }
 
 function validatePlanComposition(plan: AssistantPlan) {
+  if (plan.actions.some((a) => a.type === "page.workspace.apply") && plan.actions.length !== 1) fail("plan.actions", "页面草稿操作须单独预览确认，不能混合其他数据操作");
   const workspaceActions = plan.actions.filter(
     (action): action is AssistantRosterWorkspaceAction =>
       action.type.startsWith("roster.workspace."),

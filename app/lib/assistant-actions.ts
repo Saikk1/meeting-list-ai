@@ -1,3 +1,5 @@
+import { applyAssistantWorkspace } from "./assistant-workspace";
+import { adminConfigChanges } from "./business-data-events";
 import {
   archiveMeeting,
   createMeeting,
@@ -115,6 +117,7 @@ export type AssistantExecutionDependencies = {
 
 export type AssistantExecutionResult = {
   executedActions: number;
+  workspaceMessage?: string;
   createdMeetingIds: string[];
   updatedMeetingIds: string[];
   deletedMeetingIds: string[];
@@ -359,6 +362,7 @@ async function saveCurrentAdminConfig(
       "ADMIN_CONFIG_UNAVAILABLE",
     );
   }
+  adminConfigChanges.notify();
   return {
     revision: payload.revision as number,
     ...(isAdminConfig(payload.config)
@@ -539,6 +543,7 @@ export async function executeConfirmedPlan(
     );
   }
 
+  const pageAction = plan.actions.find((a) => a.type === "page.workspace.apply");
   const workspaceCommands = rosterWorkspaceCommands(plan);
   let workspaceSnapshot: RosterWorkspaceSnapshot | null = null;
   if (workspaceCommands.length) {
@@ -634,6 +639,7 @@ export async function executeConfirmedPlan(
   // Stage and validate every operation before the first persistent write.
   for (const action of plan.actions) {
     switch (action.type) {
+      case "page.workspace.apply": break;
       case "meeting.create": {
         const { attendees, notes, ...meetingInput } = action.input;
         const created = createMeeting(
@@ -1214,6 +1220,10 @@ export async function executeConfirmedPlan(
     }
   }
 
+  const pageResult = pageAction ? await applyAssistantWorkspace(pageAction) : null;
+  if (pageResult?.persisted && pageResult.meetingId) savedUpdatedIds.push(pageResult.meetingId);
+  if (pageResult?.createdMeetingId) savedCreatedIds.push(pageResult.createdMeetingId);
+
   const navigationPath = destination
     ? resolveAssistantNavigationPath(destination)
     : null;
@@ -1221,6 +1231,7 @@ export async function executeConfirmedPlan(
 
   return {
     executedActions: plan.actions.length,
+    ...(pageResult ? { workspaceMessage: pageResult.message } : {}),
     createdMeetingIds: savedCreatedIds,
     updatedMeetingIds: savedUpdatedIds,
     deletedMeetingIds: savedDeletedMeetingIds,

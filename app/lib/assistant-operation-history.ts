@@ -1,4 +1,5 @@
 import type { AdminConfig } from "./admin-config";
+import { adminConfigChanges } from "./business-data-events";
 import type { AssistantExecutionResult } from "./assistant-actions";
 import type { AssistantPlan } from "./assistant-contract";
 import {
@@ -136,11 +137,12 @@ export function buildAssistantOperationHistoryEntry(
   after: Pick<AssistantOperationSnapshot, "meetings" | "contacts">,
 ): AssistantOperationHistoryEntry | null {
   const actionTypes = plan.actions.map((action) => action.type);
-  const hasWorkspaceAction = actionTypes.some((type) => type.startsWith("roster.workspace."));
-  const hasFileExport = actionTypes.includes("meeting.roster.export") || actionTypes.includes("roster.workspace.export");
+  const hasWorkspaceAction = actionTypes.some((type) => type.startsWith("roster.workspace.")) || plan.actions.some((a) => a.type === "page.workspace.apply" && a.mode === "draft");
+  const hasFileExport = actionTypes.includes("meeting.roster.export") || actionTypes.includes("roster.workspace.export") || plan.actions.some((a) => a.type === "page.workspace.apply" && ["download", "save_download"].includes(a.mode));
   const meetingIds = new Set<string>([
     ...plan.actions.filter((action) => "meetingId" in action && meetingMutation(action.type)).map((action) => (action as { meetingId: string }).meetingId),
     ...result.createdMeetingIds,
+    ...result.updatedMeetingIds,
     ...result.duplicatedMeetingIds,
     ...result.purgedMeetingIds,
   ]);
@@ -181,7 +183,7 @@ export function buildAssistantOperationHistoryEntry(
     adminChange,
     reversible: hasTrackedChange && !hasWorkspaceAction,
     limitation: hasWorkspaceAction
-      ? "名单工作区操作暂不能整批撤销"
+      ? actionTypes.some((type) => type.startsWith("roster.workspace.")) ? "名单工作区操作暂不能整批撤销" : "页面草稿操作暂不能整批撤销，可在原编辑区继续修改"
       : hasFileExport
         ? "数据可以撤销，但已经下载的文件不会被收回"
         : "",
@@ -270,6 +272,7 @@ export async function undoAssistantOperation(entry: AssistantOperationHistoryEnt
         }),
       });
       if (!response.ok) throw new Error("后台配置撤销失败，请刷新后重试");
+      adminConfigChanges.notify();
     }
     updateHistoryStatus(entry.id, "undone");
   } catch (error) {

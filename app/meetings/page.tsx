@@ -39,6 +39,7 @@ import {
   Trash2,
   Utensils,
   UsersRound,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
@@ -101,8 +102,7 @@ function getProgress(meeting: MeetingRecord): ProgressSummary {
 
   if (raw && typeof raw === "object") {
     const value = raw as Record<string, unknown>;
-    const total =
-      numericField(value, ["total", "totalTasks"]) ?? fallbackTotal;
+    const total = numericField(value, ["total", "totalTasks"]) ?? fallbackTotal;
     const completed =
       numericField(value, ["completed", "completedTasks", "done"]) ??
       fallbackCompleted;
@@ -258,13 +258,13 @@ export default function MeetingsPage() {
           return meeting.date.startsWith(currentMonth);
         })
         .sort((left, right) => {
-        const leftPast = meetingTime(left) < PAGE_RENDER_TIME;
-        const rightPast = meetingTime(right) < PAGE_RENDER_TIME;
-        if (leftPast !== rightPast) return leftPast ? 1 : -1;
-        return leftPast
-          ? meetingTime(right) - meetingTime(left)
-          : meetingTime(left) - meetingTime(right);
-      }),
+          const leftPast = meetingTime(left) < PAGE_RENDER_TIME;
+          const rightPast = meetingTime(right) < PAGE_RENDER_TIME;
+          if (leftPast !== rightPast) return leftPast ? 1 : -1;
+          return leftPast
+            ? meetingTime(right) - meetingTime(left)
+            : meetingTime(left) - meetingTime(right);
+        }),
     [meetings, query, timeFilter, view],
   );
   const agendaGroups = useMemo(() => {
@@ -305,8 +305,7 @@ export default function MeetingsPage() {
           startTime: config.organization.defaultStartTime,
           attendeeEstimate: config.organization.defaultAttendeeEstimate,
           roomSize: config.organization.defaultRoomSize,
-          presentationRequired:
-            config.organization.defaultPresentationRequired,
+          presentationRequired: config.organization.defaultPresentationRequired,
         },
       });
     });
@@ -314,9 +313,9 @@ export default function MeetingsPage() {
 
   async function removeMeeting(meeting: MeetingRecord) {
     if (
-      !await confirmAction(
+      !(await confirmAction(
         `确定将“${meeting.title || "未命名会议"}”移入回收站吗？之后仍可恢复。`,
-      )
+      ))
     ) {
       return;
     }
@@ -324,9 +323,9 @@ export default function MeetingsPage() {
   }
 
   async function copyMeeting(meeting: MeetingRecord) {
-    const completed = await runMeetingOperation(() =>
-      saveMeeting(duplicateMeeting(meeting)),
-    );
+    const completed = await runMeetingOperation(() => {
+      saveMeeting(duplicateMeeting(meeting));
+    });
     if (completed) setView("active");
   }
 
@@ -350,9 +349,9 @@ export default function MeetingsPage() {
 
   async function removePermanently(meeting: MeetingRecord) {
     if (
-      !await confirmAction(
+      !(await confirmAction(
         `彻底删除“${meeting.title || "未命名会议"}”后将无法恢复，是否继续？`,
-      )
+      ))
     ) {
       return;
     }
@@ -403,6 +402,16 @@ export default function MeetingsPage() {
             placeholder="搜索会议名称、地点、负责人或组织单位"
             aria-label="搜索会议"
           />
+          {query && (
+            <button
+              className="experience-clear-search"
+              type="button"
+              aria-label="清空会议搜索"
+              onClick={() => setQuery("")}
+            >
+              <X size={16} />
+            </button>
+          )}
         </label>
         {view === "active" ? (
           <div className="meeting-list-filters" aria-label="会议时间范围">
@@ -445,6 +454,31 @@ export default function MeetingsPage() {
           </button>
         </div>
       </section>
+      {(query.trim() || (view === "active" && timeFilter !== "all")) && (
+        <div className="experience-filter-summary">
+          <span role="status">
+            当前筛选：{query.trim() ? `“${query.trim()}”` : ""}{" "}
+            {view === "active" && timeFilter !== "all"
+              ? {
+                  upcoming: "待举行",
+                  week: "未来 7 天",
+                  month: "本月",
+                  past: "已结束",
+                }[timeFilter]
+              : ""}{" "}
+            · {sortedMeetings.length} 场
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setTimeFilter("all");
+            }}
+          >
+            清除筛选
+          </button>
+        </div>
+      )}
       {!meetings.length ? (
         <section className="meeting-empty-state meeting-empty-state--page">
           <span className="meeting-empty-state__icon">
@@ -480,27 +514,27 @@ export default function MeetingsPage() {
           </p>
           {view === "active" ? (
             <div className="meeting-empty-state__actions">
-            <Link
-              className="assistant-button primary assistant-button--primary"
-              href="/meetings/new"
-            >
-              <Plus aria-hidden="true" />
-              新建会议
-            </Link>
-            <button
-              className="assistant-button secondary assistant-button--secondary"
-              type="button"
-              disabled={configLoading || Boolean(configError)}
-              title={
-                configError
-                  ? "管理中心配置读取失败，请先修复后再创建"
-                  : undefined
-              }
-              onClick={addDemoMeeting}
-            >
-              <Sparkles aria-hidden="true" />
-              创建演示会议
-            </button>
+              <Link
+                className="assistant-button primary assistant-button--primary"
+                href="/meetings/new"
+              >
+                <Plus aria-hidden="true" />
+                新建会议
+              </Link>
+              <button
+                className="assistant-button secondary assistant-button--secondary"
+                type="button"
+                disabled={configLoading || Boolean(configError)}
+                title={
+                  configError
+                    ? "管理中心配置读取失败，请先修复后再创建"
+                    : undefined
+                }
+                onClick={addDemoMeeting}
+              >
+                <Sparkles aria-hidden="true" />
+                创建演示会议
+              </button>
             </div>
           ) : null}
         </section>
@@ -530,7 +564,11 @@ export default function MeetingsPage() {
               <span className="assistant-eyebrow">会议项目</span>
               <h2>
                 {sortedMeetings.length} 场
-                {view === "active" ? "会议正在管理" : view === "archived" ? "会议已归档" : "会议待处理"}
+                {view === "active"
+                  ? "会议正在管理"
+                  : view === "archived"
+                    ? "会议已归档"
+                    : "会议待处理"}
               </h2>
             </div>
             <p>
@@ -600,178 +638,180 @@ export default function MeetingsPage() {
               ))}
             </div>
           ) : (
-          <div className="meeting-card-grid">
-            {sortedMeetings.map((meeting) => {
-              const progress = getProgress(meeting);
-              const phase = meetingPhase(meeting);
-              const attendees = Array.isArray(meeting.attendees)
-                ? meeting.attendees.length
-                : 0;
+            <div className="meeting-card-grid">
+              {sortedMeetings.map((meeting) => {
+                const progress = getProgress(meeting);
+                const phase = meetingPhase(meeting);
+                const attendees = Array.isArray(meeting.attendees)
+                  ? meeting.attendees.length
+                  : 0;
 
-              return (
-                <article className="meeting-card" key={meeting.id}>
-                  <div className="meeting-card__topline">
-                    <span
-                      className={`meeting-status meeting-status--${phase.tone}`}
-                    >
-                      {phase.label}
-                    </span>
-                    <div className="meeting-card__actions">
-                      {view === "trash" ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void restoreDeleted(meeting)}
-                            aria-label={`恢复${meeting.title || "该会议"}`}
-                            title="恢复会议"
-                          >
-                            <ArchiveRestore aria-hidden="true" />
-                          </button>
-                          <button
-                            className="danger"
-                            type="button"
-                            onClick={() => void removePermanently(meeting)}
-                            aria-label={`彻底删除${meeting.title || "该会议"}`}
-                            title="彻底删除"
-                          >
-                            <Trash2 aria-hidden="true" />
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void copyMeeting(meeting)}
-                            aria-label={`复制${meeting.title || "该会议"}`}
-                            title="复制会议"
-                          >
-                            <Copy aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void (view === "archived"
-                                ? restoreArchive(meeting)
-                                : archive(meeting))
-                            }
-                            aria-label={`${view === "archived" ? "恢复" : "归档"}${meeting.title || "该会议"}`}
-                            title={view === "archived" ? "恢复到当前会议" : "归档会议"}
-                          >
-                            {view === "archived" ? (
-                              <ArchiveRestore aria-hidden="true" />
-                            ) : (
-                              <Archive aria-hidden="true" />
-                            )}
-                          </button>
-                          <button
-                            className="danger"
-                            type="button"
-                            onClick={() => void removeMeeting(meeting)}
-                            aria-label={`删除${meeting.title || "该会议"}`}
-                            title="移入回收站"
-                          >
-                            <Trash2 aria-hidden="true" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="meeting-card__heading">
-                    <h2>{meeting.title || "未命名会议"}</h2>
-                    <p>
-                      {meeting.organizer
-                        ? `${meeting.organizer} · `
-                        : ""}
-                      {meeting.owner ? `${meeting.owner}负责` : "负责人待定"}
-                    </p>
-                  </div>
-
-                  <dl className="meeting-card__meta">
-                    <div>
-                      <dt>
-                        <CalendarDays aria-hidden="true" />
-                        日期
-                      </dt>
-                      <dd>
-                        {formatDate(meeting)}
-                        {meeting.startTime ? ` ${meeting.startTime}` : ""}
-                        {meeting.endTime ? `－${meeting.endTime}` : ""}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>
-                        <MapPin aria-hidden="true" />
-                        地点
-                      </dt>
-                      <dd>{meeting.location || "待确定"}</dd>
-                    </div>
-                    <div>
-                      <dt>
-                        <UsersRound aria-hidden="true" />
-                        人数
-                      </dt>
-                      <dd>
-                        {attendees || meeting.attendeeEstimate || 0} 人
-                        {attendees ? "（已录入）" : "（预计）"}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  <div className="meeting-tag-list" aria-label="保障情景">
-                    {meetingTags(meeting).map(({ label, icon: Icon }) => (
-                      <span className="meeting-tag" key={label}>
-                        <Icon aria-hidden="true" />
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="meeting-progress">
-                    <div className="meeting-progress__label">
-                      <span>保障进度</span>
-                      <strong>
-                        {progress.completed}/{progress.total} 项 ·{" "}
-                        {progress.percent}%
-                      </strong>
-                    </div>
-                    <div
-                      className="meeting-progress__track"
-                      role="progressbar"
-                      aria-label={`${meeting.title || "会议"}保障进度`}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={progress.percent}
-                    >
+                return (
+                  <article className="meeting-card" key={meeting.id}>
+                    <div className="meeting-card__topline">
                       <span
-                        className="meeting-progress__value"
-                        style={{ width: `${progress.percent}%` }}
-                      />
+                        className={`meeting-status meeting-status--${phase.tone}`}
+                      >
+                        {phase.label}
+                      </span>
+                      <div className="meeting-card__actions">
+                        {view === "trash" ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void restoreDeleted(meeting)}
+                              aria-label={`恢复${meeting.title || "该会议"}`}
+                              title="恢复会议"
+                            >
+                              <ArchiveRestore aria-hidden="true" />
+                            </button>
+                            <button
+                              className="danger"
+                              type="button"
+                              onClick={() => void removePermanently(meeting)}
+                              aria-label={`彻底删除${meeting.title || "该会议"}`}
+                              title="彻底删除"
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void copyMeeting(meeting)}
+                              aria-label={`复制${meeting.title || "该会议"}`}
+                              title="复制会议"
+                            >
+                              <Copy aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void (view === "archived"
+                                  ? restoreArchive(meeting)
+                                  : archive(meeting))
+                              }
+                              aria-label={`${view === "archived" ? "恢复" : "归档"}${meeting.title || "该会议"}`}
+                              title={
+                                view === "archived"
+                                  ? "恢复到当前会议"
+                                  : "归档会议"
+                              }
+                            >
+                              {view === "archived" ? (
+                                <ArchiveRestore aria-hidden="true" />
+                              ) : (
+                                <Archive aria-hidden="true" />
+                              )}
+                            </button>
+                            <button
+                              className="danger"
+                              type="button"
+                              onClick={() => void removeMeeting(meeting)}
+                              aria-label={`删除${meeting.title || "该会议"}`}
+                              title="移入回收站"
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {view === "trash" ? (
-                    <button
-                      className="meeting-card__open"
-                      type="button"
-                      onClick={() => void restoreDeleted(meeting)}
-                    >
-                      恢复会议
-                      <ArchiveRestore aria-hidden="true" />
-                    </button>
-                  ) : (
-                    <Link
-                      className="meeting-card__open"
-                      href={`/meetings/${meeting.id}`}
-                    >
-                      打开会议
-                      <ArrowRight aria-hidden="true" />
-                    </Link>
-                  )}
-                </article>
-              );
-            })}
-          </div>
+                    <div className="meeting-card__heading">
+                      <h2>{meeting.title || "未命名会议"}</h2>
+                      <p>
+                        {meeting.organizer ? `${meeting.organizer} · ` : ""}
+                        {meeting.owner ? `${meeting.owner}负责` : "负责人待定"}
+                      </p>
+                    </div>
+
+                    <dl className="meeting-card__meta">
+                      <div>
+                        <dt>
+                          <CalendarDays aria-hidden="true" />
+                          日期
+                        </dt>
+                        <dd>
+                          {formatDate(meeting)}
+                          {meeting.startTime ? ` ${meeting.startTime}` : ""}
+                          {meeting.endTime ? `－${meeting.endTime}` : ""}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>
+                          <MapPin aria-hidden="true" />
+                          地点
+                        </dt>
+                        <dd>{meeting.location || "待确定"}</dd>
+                      </div>
+                      <div>
+                        <dt>
+                          <UsersRound aria-hidden="true" />
+                          人数
+                        </dt>
+                        <dd>
+                          {attendees || meeting.attendeeEstimate || 0} 人
+                          {attendees ? "（已录入）" : "（预计）"}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <div className="meeting-tag-list" aria-label="保障情景">
+                      {meetingTags(meeting).map(({ label, icon: Icon }) => (
+                        <span className="meeting-tag" key={label}>
+                          <Icon aria-hidden="true" />
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="meeting-progress">
+                      <div className="meeting-progress__label">
+                        <span>保障进度</span>
+                        <strong>
+                          {progress.completed}/{progress.total} 项 ·{" "}
+                          {progress.percent}%
+                        </strong>
+                      </div>
+                      <div
+                        className="meeting-progress__track"
+                        role="progressbar"
+                        aria-label={`${meeting.title || "会议"}保障进度`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={progress.percent}
+                      >
+                        <span
+                          className="meeting-progress__value"
+                          style={{ width: `${progress.percent}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {view === "trash" ? (
+                      <button
+                        className="meeting-card__open"
+                        type="button"
+                        onClick={() => void restoreDeleted(meeting)}
+                      >
+                        恢复会议
+                        <ArchiveRestore aria-hidden="true" />
+                      </button>
+                    ) : (
+                      <Link
+                        className="meeting-card__open"
+                        href={`/meetings/${meeting.id}`}
+                      >
+                        打开会议
+                        <ArrowRight aria-hidden="true" />
+                      </Link>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
           )}
         </section>
       )}

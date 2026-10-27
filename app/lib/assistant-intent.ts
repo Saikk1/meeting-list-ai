@@ -26,6 +26,7 @@ export function detectAssistantIntentBoundary(
 ): AssistantIntentBoundary | null {
   const text = input.normalize("NFKC").replace(/\s+/g, " ").trim();
   if (!text) return null;
+  if (/会议方案|会议背景|会议议程|编排议程|起草背景/.test(text)) return "update_meeting";
 
   if (/(?:通讯录|联系人|联系人员|人员档案|常用人员)/.test(text)) {
     return "manage_contacts";

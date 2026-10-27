@@ -54,6 +54,22 @@ async function callApi(store, init = {}) {
   return response;
 }
 
+test("meeting plans persist across restart and stale or invalid plans cannot overwrite", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "meeting-plan-store-"));
+  try {
+    const meetingPlan = { title: "虚构测试会议方案", background: "用于独立测试的背景", date: "2030-08-20", startTime: "09:00", endTime: "11:00", location: "测试地点", groups: [{ id: "group-test", label: "示例工作组", people: [], collective: "相关部门负责人" }], agenda: [{ id: "agenda-test", content: "交流讨论", speaker: "", duration: "" }], source: { title: "测试会议", time: "[]", location: "测试地点", people: "[]" } };
+    const store = createLocalMeetingStore({ dataDirectory: directory });
+    const first = await callApi(store, { method: "PUT", body: JSON.stringify({ meetings: [makeMeeting({ meetingPlan })], expectedRevision: 0 }) });
+    assert.equal(first.status, 200);
+    const saved = await (await callApi(createLocalMeetingStore({ dataDirectory: directory }))).json();
+    assert.deepEqual(saved.meetings[0].meetingPlan, meetingPlan);
+    const invalid = structuredClone(saved.meetings); invalid[0].meetingPlan.agenda[0].code = "forbidden";
+    assert.equal((await callApi(store, { method: "PUT", body: JSON.stringify({ meetings: invalid, expectedRevision: saved.revision }) })).status, 400);
+    assert.equal((await callApi(store, { method: "PUT", body: JSON.stringify({ meetings: saved.meetings, expectedRevision: 0 }) })).status, 409);
+    assert.deepEqual((await (await callApi(store)).json()).meetings[0].meetingPlan, meetingPlan);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test("seating plan persists separately, invalid seat assignment cannot overwrite it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "meeting-seating-"));
   try {
@@ -96,6 +112,30 @@ test("meetings persist after constructing a fresh local store", async () => {
     assert.equal(payload.meetings.length, 1);
     assert.equal(payload.meetings[0].meetingRoomId, "room-one");
     assert.equal(payload.meetings[0].title, "本机持久化测试会议");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("previously imported tasks remain editable after removing their source module", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "meeting-legacy-task-"));
+  try {
+    const source = { recordId: "record-legacy", versionId: "version-legacy", actionId: "action-legacy", title: "虚构历史资料" };
+    const task = { id: "task-legacy", templateId: "legacy-import", title: "提交调研方案", description: "历史导入的任务", phase: "after", group: "会议落实事项", status: "todo", owner: "示例甲", dueDate: "2030-01-10", note: "", attachments: [], minutesSource: source };
+    let store = createLocalMeetingStore({ dataDirectory: directory });
+    let response = await callApi(store, { method: "PUT", body: JSON.stringify({ meetings: [makeMeeting({ tasks: [task] })] }) });
+    assert.equal(response.status, 200);
+    store = createLocalMeetingStore({ dataDirectory: directory });
+    const saved = await (await callApi(store)).json();
+    saved.meetings[0].tasks[0].status = "done";
+    response = await callApi(store, { method: "PUT", body: JSON.stringify({ meetings: saved.meetings, expectedRevision: saved.revision }) });
+    assert.equal(response.status, 200);
+    const restored = await (await callApi(createLocalMeetingStore({ dataDirectory: directory }))).json();
+    assert.equal(restored.meetings[0].tasks[0].status, "done");
+    assert.deepEqual(restored.meetings[0].tasks[0].minutesSource, source);
+    response = await callApi(store, { method: "PUT", body: JSON.stringify({ meetings: saved.meetings, expectedRevision: saved.revision }) });
+    assert.equal(response.status, 409);
+    assert.equal((await (await callApi(store)).json()).meetings[0].tasks[0].status, "done");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

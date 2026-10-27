@@ -1,5 +1,6 @@
 "use client";
 
+import { useAssistantWorkspace } from "../components/use-assistant-workspace";
 import { AssistantShell } from "@/app/components/assistant-shell";
 import {
   EMPTY_MEETINGS,
@@ -41,7 +42,16 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useMemo, useState, useSyncExternalStore } from "react";
+import { useWorkspaceTabStatus } from "../components/workspace-tabs";
+import { confirmAction } from "../lib/confirmation";
+import { notifySaved } from "../components/app-feedback";
+import {
+  FormEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   todo: "待办",
@@ -86,7 +96,8 @@ function localDate() {
 
 function formatMeetingDate(meeting: MeetingRecord) {
   const parsed = new Date(`${meeting.date}T${meeting.startTime || "00:00"}:00`);
-  if (Number.isNaN(parsed.getTime())) return `${meeting.date} ${meeting.startTime}`.trim();
+  if (Number.isNaN(parsed.getTime()))
+    return `${meeting.date} ${meeting.startTime}`.trim();
   const date = new Intl.DateTimeFormat("zh-CN", {
     month: "numeric",
     day: "numeric",
@@ -108,7 +119,10 @@ function taskId() {
 }
 
 function groupByMeeting(items: TaskCenterItem[]) {
-  const groups = new Map<string, { meeting: MeetingRecord; items: TaskCenterItem[] }>();
+  const groups = new Map<
+    string,
+    { meeting: MeetingRecord; items: TaskCenterItem[] }
+  >();
   for (const item of items) {
     const group = groups.get(item.meeting.id);
     if (group) group.items.push(item);
@@ -160,6 +174,10 @@ export default function TaskCenterPage() {
   const [savingKey, setSavingKey] = useState("");
   const [operationError, setOperationError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const createForm = useRef<HTMLFormElement>(null);
+  const [newTaskBaseline, setNewTaskBaseline] = useState<NewTaskDraft | null>(
+    null,
+  );
   const [newTask, setNewTask] = useState<NewTaskDraft>({
     meetingId: "",
     title: "",
@@ -167,6 +185,30 @@ export default function TaskCenterPage() {
     owner: "",
     dueDate: "",
   });
+  const dirty =
+    showCreate &&
+    newTaskBaseline !== null &&
+    JSON.stringify(newTask) !== JSON.stringify(newTaskBaseline);
+  useWorkspaceTabStatus({
+    title: "会务待办",
+    dirty,
+    dirtyReasons: dirty ? ["尚未保存的临时事项"] : [],
+    busy: !!savingKey,
+  });
+  async function closeCreateTask() {
+    if (savingKey) return;
+    if (
+      dirty &&
+      !(await confirmAction({
+        title: "放弃临时事项？",
+        message: "填写的临时事项尚未保存，放弃后需要重新填写。",
+        confirmLabel: "放弃填写",
+        cancelLabel: "继续填写",
+      }))
+    )
+      return;
+    setShowCreate(false);
+  }
 
   const items = useMemo(
     () => buildTaskCenterItems(meetings, today),
@@ -184,18 +226,19 @@ export default function TaskCenterPage() {
     [items],
   );
   const visibleItems = useMemo(
-    () =>
-      filterTaskCenterItems(
-        items,
-        { filter, query, owner, phase },
-        today,
-      ),
+    () => filterTaskCenterItems(items, { filter, query, owner, phase }, today),
     [filter, items, owner, phase, query, today],
   );
   const meetingGroups = useMemo(
     () => groupByMeeting(visibleItems),
     [visibleItems],
   );
+
+  useAssistantWorkspace({
+    suffix: "tasks", kind: "tasks", label: "会务待办 · " + (query || "当前筛选"), dirty,
+    data: { filters: { filter, query, owner, phase }, visible: visibleItems.map((item) => ({ meetingId: item.meeting.id, task: item.task })), newTask: showCreate ? newTask : null },
+    editableFields: [], apply: () => { throw new Error("请使用任务专用操作"); },
+  });
 
   async function persistMeeting(next: MeetingRecord) {
     saveMeeting(next);
@@ -224,6 +267,7 @@ export default function TaskCenterPage() {
       await persistMeeting(
         updateMeetingTask(currentMeeting, currentTaskId, patch),
       );
+      notifySaved("事项修改已保存");
     } catch {
       setOperationError("本次修改未能保存，请稍后重试。");
     } finally {
@@ -232,15 +276,25 @@ export default function TaskCenterPage() {
   }
 
   function openCreateTask() {
+    if (showCreate) {
+      createForm.current?.querySelector<HTMLInputElement>("input")?.focus();
+      createForm.current?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+      return;
+    }
     const preferred =
       meetings.find((meeting) => meeting.date >= today) ?? meetings[0];
-    setNewTask({
+    const draft: NewTaskDraft = {
       meetingId: preferred?.id ?? "",
       title: "",
       phase: "before",
       owner: preferred?.owner ?? "",
       dueDate: preferred?.date ?? "",
-    });
+    };
+    setNewTask(draft);
+    setNewTaskBaseline(draft);
     setOperationError("");
     setShowCreate(true);
   }
@@ -281,6 +335,7 @@ export default function TaskCenterPage() {
       });
       setFilter("open");
       setShowCreate(false);
+      notifySaved("临时事项已加入会议待办");
     } catch {
       setOperationError("临时事项未能保存，请稍后重试。");
     } finally {
@@ -330,25 +385,36 @@ export default function TaskCenterPage() {
         </div>
         <div className="task-workbench-focus__counts">
           <button type="button" onClick={() => setFilter("overdue")}>
-            <strong>{summary.overdue}</strong><span>逾期</span>
+            <strong>{summary.overdue}</strong>
+            <span>逾期</span>
           </button>
           <button type="button" onClick={() => setFilter("today")}>
-            <strong>{summary.today}</strong><span>今天</span>
+            <strong>{summary.today}</strong>
+            <span>今天</span>
           </button>
           <button type="button" onClick={() => setFilter("week")}>
-            <strong>{summary.week}</strong><span>近 7 天</span>
+            <strong>{summary.week}</strong>
+            <span>近 7 天</span>
           </button>
         </div>
       </section>
 
       {showCreate ? (
-        <form className="task-create-panel" onSubmit={(event) => void createTask(event)}>
+        <form
+          ref={createForm}
+          className="task-create-panel"
+          onSubmit={(event) => void createTask(event)}
+        >
           <div className="task-create-panel__heading">
             <div>
               <span className="assistant-eyebrow">快速补充</span>
               <h2>新增一项临时会务事项</h2>
             </div>
-            <button type="button" onClick={() => setShowCreate(false)} aria-label="关闭新增事项">
+            <button
+              type="button"
+              onClick={() => void closeCreateTask()}
+              aria-label="关闭新增事项"
+            >
               <X aria-hidden="true" />
             </button>
           </div>
@@ -359,7 +425,9 @@ export default function TaskCenterPage() {
                 <select
                   value={newTask.meetingId}
                   onChange={(event) => {
-                    const nextMeeting = meetings.find((meeting) => meeting.id === event.target.value);
+                    const nextMeeting = meetings.find(
+                      (meeting) => meeting.id === event.target.value,
+                    );
                     setNewTask((current) => ({
                       ...current,
                       meetingId: event.target.value,
@@ -369,17 +437,38 @@ export default function TaskCenterPage() {
                   }}
                 >
                   {meetings.map((meeting) => (
-                    <option key={meeting.id} value={meeting.id}>{meeting.title} · {meeting.date}</option>
+                    <option key={meeting.id} value={meeting.id}>
+                      {meeting.title} · {meeting.date}
+                    </option>
                   ))}
                 </select>
               </label>
               <label className="task-create-panel__title">
                 <span>事项名称</span>
-                <input autoFocus value={newTask.title} onChange={(event) => setNewTask((current) => ({ ...current, title: event.target.value }))} placeholder="例如：确认领导席位调整" maxLength={120} />
+                <input
+                  autoFocus
+                  value={newTask.title}
+                  onChange={(event) =>
+                    setNewTask((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                  placeholder="例如：确认领导席位调整"
+                  maxLength={120}
+                />
               </label>
               <label>
                 <span>阶段</span>
-                <select value={newTask.phase} onChange={(event) => setNewTask((current) => ({ ...current, phase: event.target.value as MeetingPhase }))}>
+                <select
+                  value={newTask.phase}
+                  onChange={(event) =>
+                    setNewTask((current) => ({
+                      ...current,
+                      phase: event.target.value as MeetingPhase,
+                    }))
+                  }
+                >
                   <option value="before">会议前</option>
                   <option value="during">会议中</option>
                   <option value="after">会议后</option>
@@ -387,14 +476,37 @@ export default function TaskCenterPage() {
               </label>
               <label>
                 <span>负责人</span>
-                <input value={newTask.owner} onChange={(event) => setNewTask((current) => ({ ...current, owner: event.target.value }))} placeholder="可暂不分配" />
+                <input
+                  value={newTask.owner}
+                  onChange={(event) =>
+                    setNewTask((current) => ({
+                      ...current,
+                      owner: event.target.value,
+                    }))
+                  }
+                  placeholder="可暂不分配"
+                />
               </label>
               <label>
                 <span>截止日期</span>
-                <input type="date" value={newTask.dueDate} onChange={(event) => setNewTask((current) => ({ ...current, dueDate: event.target.value }))} />
+                <input
+                  type="date"
+                  value={newTask.dueDate}
+                  onChange={(event) =>
+                    setNewTask((current) => ({
+                      ...current,
+                      dueDate: event.target.value,
+                    }))
+                  }
+                />
               </label>
-              <button className="assistant-button primary assistant-button--primary" type="submit" disabled={Boolean(savingKey)}>
-                <Save aria-hidden="true" />保存事项
+              <button
+                className="assistant-button primary assistant-button--primary"
+                type="submit"
+                disabled={Boolean(savingKey)}
+              >
+                <Save aria-hidden="true" />
+                保存事项
               </button>
             </div>
           ) : (
@@ -426,40 +538,103 @@ export default function TaskCenterPage() {
         <div className="task-center-toolbar">
           <label className="task-center-search">
             <Search aria-hidden="true" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索事项或会议" aria-label="搜索待办" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索事项或会议"
+              aria-label="搜索待办"
+            />
+            {query && (
+              <button
+                className="experience-clear-search"
+                type="button"
+                aria-label="清空待办搜索"
+                onClick={() => setQuery("")}
+              >
+                <X size={16} />
+              </button>
+            )}
           </label>
-          <select value={owner} onChange={(event) => setOwner(event.target.value)} aria-label="按负责人筛选">
+          <select
+            value={owner}
+            onChange={(event) => setOwner(event.target.value)}
+            aria-label="按负责人筛选"
+          >
             <option value="">全部负责人</option>
-            {owners.map((item) => <option key={item} value={item}>{item}</option>)}
+            {owners.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
           </select>
-          <select value={phase} onChange={(event) => setPhase(event.target.value as MeetingPhase | "all")} aria-label="按会议阶段筛选">
+          <select
+            value={phase}
+            onChange={(event) =>
+              setPhase(event.target.value as MeetingPhase | "all")
+            }
+            aria-label="按会议阶段筛选"
+          >
             <option value="all">全部阶段</option>
             <option value="before">会议前</option>
             <option value="during">会议中</option>
             <option value="after">会议后</option>
           </select>
-          <button className="task-center-reset" type="button" onClick={resetFilters}>
-            <RotateCcw aria-hidden="true" />重置
+          <button
+            className="task-center-reset"
+            type="button"
+            onClick={resetFilters}
+          >
+            <RotateCcw aria-hidden="true" />
+            重置
           </button>
         </div>
 
-        {operationError ? <p className="assistant-inline-error">{operationError}</p> : null}
+        <div className="experience-filter-summary">
+          <span role="status">
+            {FILTERS.find((item) => item.id === filter)?.label || "全部事项"} ·{" "}
+            {visibleItems.length} 项{owner ? ` · 负责人：${owner}` : ""}
+            {phase !== "all" ? ` · ${PHASE_LABELS[phase]}` : ""}
+            {query.trim() ? ` · “${query.trim()}”` : ""}
+          </span>
+        </div>
+        {operationError ? (
+          <p className="assistant-inline-error" role="alert">
+            {operationError}
+          </p>
+        ) : null}
 
         {!items.length ? (
           <div className="meeting-empty-state task-center-empty">
-            <span className="meeting-empty-state__icon"><CheckCircle2 aria-hidden="true" /></span>
+            <span className="meeting-empty-state__icon">
+              <CheckCircle2 aria-hidden="true" />
+            </span>
             <h3>当前会议没有适用事项</h3>
-            <p>没有待执行工作时会按 100% 计算；如有临时安排，可在这里直接新增。</p>
-            <button className="assistant-button primary assistant-button--primary" type="button" onClick={openCreateTask}>
-              <Plus aria-hidden="true" />新增临时事项
+            <p>
+              没有待执行工作时会按 100% 计算；如有临时安排，可在这里直接新增。
+            </p>
+            <button
+              className="assistant-button primary assistant-button--primary"
+              type="button"
+              onClick={openCreateTask}
+            >
+              <Plus aria-hidden="true" />
+              新增临时事项
             </button>
           </div>
         ) : !visibleItems.length ? (
           <div className="meeting-empty-state task-center-empty">
-            <span className="meeting-empty-state__icon"><CheckCircle2 aria-hidden="true" /></span>
+            <span className="meeting-empty-state__icon">
+              <CheckCircle2 aria-hidden="true" />
+            </span>
             <h3>这个范围内没有事项</h3>
             <p>可以切换上方范围，或者重置搜索条件。</p>
-            <button className="assistant-button secondary assistant-button--secondary" type="button" onClick={resetFilters}>重置筛选</button>
+            <button
+              className="assistant-button secondary assistant-button--secondary"
+              type="button"
+              onClick={resetFilters}
+            >
+              重置筛选
+            </button>
           </div>
         ) : (
           <div className="task-meeting-groups">
@@ -474,44 +649,113 @@ export default function TaskCenterPage() {
                     </div>
                     <div className="task-meeting-group__identity">
                       <h2>{meeting.title}</h2>
-                      <span><MapPin aria-hidden="true" />{meeting.location || "地点待定"}</span>
-                      <span><UserRound aria-hidden="true" />{meeting.owner || "会议负责人待定"}</span>
+                      <span>
+                        <MapPin aria-hidden="true" />
+                        {meeting.location || "地点待定"}
+                      </span>
+                      <span>
+                        <UserRound aria-hidden="true" />
+                        {meeting.owner || "会议负责人待定"}
+                      </span>
                     </div>
                     <div className="task-meeting-group__progress">
-                      <span><strong>{progress.percent}%</strong>{progress.completed}/{progress.total} 项完成</span>
-                      <i><b style={{ width: `${progress.percent}%` }} /></i>
+                      <span>
+                        <strong>{progress.percent}%</strong>
+                        {progress.completed}/{progress.total} 项完成
+                      </span>
+                      <i>
+                        <b style={{ width: `${progress.percent}%` }} />
+                      </i>
                     </div>
                     <Link href={`/meetings/${encodeURIComponent(meeting.id)}`}>
-                      进入会议<ChevronRight aria-hidden="true" />
+                      进入会议
+                      <ChevronRight aria-hidden="true" />
                     </Link>
                   </header>
                   <div className="task-center-list">
                     {meetingItems.map(({ task, dueState }) => {
                       const key = `${meeting.id}:${task.id}`;
                       const disabled = savingKey === key;
-                      const finished = task.status === "done" || task.status === "waived";
+                      const finished =
+                        task.status === "done" || task.status === "waived";
                       return (
-                        <article className={`task-center-row${finished ? " is-complete" : ""}`} key={key}>
-                          <button type="button" className="task-center-complete" aria-label={finished ? "恢复为待办" : "标记为完成"} title={finished ? "恢复为待办" : "标记为完成"} disabled={disabled} onClick={() => void patchTask(meeting.id, task.id, { status: finished ? "todo" : "done" })}>
+                        <article
+                          className={`task-center-row${finished ? " is-complete" : ""}`}
+                          key={key}
+                        >
+                          <button
+                            type="button"
+                            className="task-center-complete"
+                            aria-label={finished ? "恢复为待办" : "标记为完成"}
+                            title={finished ? "恢复为待办" : "标记为完成"}
+                            disabled={disabled}
+                            onClick={() =>
+                              void patchTask(meeting.id, task.id, {
+                                status: finished ? "todo" : "done",
+                              })
+                            }
+                          >
                             {finished ? <Check aria-hidden="true" /> : null}
                           </button>
                           <div className="task-center-task">
-                            <div className="task-center-task__meta"><span>{PHASE_LABELS[task.phase]}</span><span>{task.group || "通用事项"}</span></div>
+                            <div className="task-center-task__meta">
+                              <span>{PHASE_LABELS[task.phase]}</span>
+                              <span>{task.group || "通用事项"}</span>
+                            </div>
                             <strong>{task.title}</strong>
-                            <small>{task.description || "按会议实际情况执行并留痕"}</small>
+                            <small>
+                              {task.description || "按会议实际情况执行并留痕"}
+                            </small>
                           </div>
                           <label className="task-center-field">
                             <span>负责人</span>
-                            <OwnerEditor key={task.owner} value={task.owner} disabled={disabled} onCommit={(value) => void patchTask(meeting.id, task.id, { owner: value })} />
+                            <OwnerEditor
+                              key={task.owner}
+                              value={task.owner}
+                              disabled={disabled}
+                              onCommit={(value) =>
+                                void patchTask(meeting.id, task.id, {
+                                  owner: value,
+                                })
+                              }
+                            />
                           </label>
-                          <label className={`task-center-field task-center-due task-center-due--${dueState}`}>
+                          <label
+                            className={`task-center-field task-center-due task-center-due--${dueState}`}
+                          >
                             <span>{dueLabel(dueState, task.dueDate)}</span>
-                            <input type="date" value={task.dueDate} disabled={disabled} aria-label="截止日期" onChange={(event) => void patchTask(meeting.id, task.id, { dueDate: event.target.value })} />
+                            <input
+                              type="date"
+                              value={task.dueDate}
+                              disabled={disabled}
+                              aria-label="截止日期"
+                              onChange={(event) =>
+                                void patchTask(meeting.id, task.id, {
+                                  dueDate: event.target.value,
+                                })
+                              }
+                            />
                           </label>
                           <label className="task-center-field">
                             <span>状态</span>
-                            <select className={`task-center-status task-center-status--${task.status}`} value={task.status} disabled={disabled} aria-label="任务状态" onChange={(event) => void patchTask(meeting.id, task.id, { status: event.target.value as TaskStatus })}>
-                              {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                            <select
+                              className={`task-center-status task-center-status--${task.status}`}
+                              value={task.status}
+                              disabled={disabled}
+                              aria-label="任务状态"
+                              onChange={(event) =>
+                                void patchTask(meeting.id, task.id, {
+                                  status: event.target.value as TaskStatus,
+                                })
+                              }
+                            >
+                              {Object.entries(STATUS_LABELS).map(
+                                ([value, label]) => (
+                                  <option key={value} value={value}>
+                                    {label}
+                                  </option>
+                                ),
+                              )}
                             </select>
                           </label>
                         </article>

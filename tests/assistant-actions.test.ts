@@ -943,8 +943,8 @@ test("meeting roster export validates, ranks, builds xlsx and reports its file",
   ];
   const meeting = createMeeting(baseInput, { attendees });
   const rosterRules = cloneAdminConfig(DEFAULT_ADMIN_CONFIG).rosterRules;
-  let captured: AssistantRosterExportPayload | null = null;
-  let workbookBytes: ArrayBuffer | null = null;
+  const exports: AssistantRosterExportPayload[] = [];
+  const workbooks: ArrayBuffer[] = [];
   const saved: MeetingRecord[] = [];
   const exportAction = {
     type: "meeting.roster.export" as const,
@@ -961,12 +961,14 @@ test("meeting roster export validates, ranks, builds xlsx and reports its file",
       return next;
     },
     exportRoster: async (payload) => {
-      captured = payload;
-      workbookBytes = await buildAssistantRosterXlsx(payload);
+      exports.push(payload);
+      workbooks.push(await buildAssistantRosterXlsx(payload));
       return payload.fileName;
     },
   });
 
+  const captured = exports[0];
+  const workbookBytes = workbooks[0];
   assert.ok(captured);
   assert.ok(workbookBytes);
   assert.deepEqual(
@@ -1546,7 +1548,7 @@ test("meeting lifecycle actions are confirmed, state-checked and executed", asyn
     }]),
     {
       loadMeetings: () => [active],
-      archiveMeeting: (id) => calls.push(`archive:${id}`),
+      archiveMeeting: (id) => { calls.push(`archive:${id}`); },
     },
   );
   assert.deepEqual(archivedResult.archivedMeetingIds, [active.id]);
@@ -1559,7 +1561,7 @@ test("meeting lifecycle actions are confirmed, state-checked and executed", asyn
     }]),
     {
       loadMeetings: () => [archived],
-      restoreArchivedMeeting: (id) => calls.push(`restore-archive:${id}`),
+      restoreArchivedMeeting: (id) => { calls.push(`restore-archive:${id}`); },
     },
   );
   assert.deepEqual(restoredArchiveResult.restoredMeetingIds, [active.id]);
@@ -1572,7 +1574,7 @@ test("meeting lifecycle actions are confirmed, state-checked and executed", asyn
     }]),
     {
       loadMeetings: () => [deleted],
-      restoreDeletedMeeting: (id) => calls.push(`restore-trash:${id}`),
+      restoreDeletedMeeting: (id) => { calls.push(`restore-trash:${id}`); },
     },
   );
   assert.deepEqual(restoredDeletedResult.restoredMeetingIds, [active.id]);
@@ -1585,7 +1587,7 @@ test("meeting lifecycle actions are confirmed, state-checked and executed", asyn
     }]),
     {
       loadMeetings: () => [deleted],
-      purgeMeeting: (id) => calls.push(`purge:${id}`),
+      purgeMeeting: (id) => { calls.push(`purge:${id}`); },
     },
   );
   assert.deepEqual(purgedResult.purgedMeetingIds, [active.id]);

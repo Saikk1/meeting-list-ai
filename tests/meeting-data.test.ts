@@ -45,9 +45,10 @@ const baseMeeting: MeetingInput = {
   roomSize: "large",
 };
 
-test("the built-in source checklist contains exactly 29 action items", () => {
-  assert.equal(CHECKLIST_TEMPLATE.length, 29);
-  assert.equal(new Set(CHECKLIST_TEMPLATE.map((item) => item.id)).size, 29);
+test("the built-in source checklist includes the meeting plan preparation step", () => {
+  assert.equal(CHECKLIST_TEMPLATE.length, 30);
+  assert.ok(CHECKLIST_TEMPLATE.some((item) => item.id === "prepare-meeting-plan" && item.phase === "before"));
+  assert.equal(new Set(CHECKLIST_TEMPLATE.map((item) => item.id)).size, CHECKLIST_TEMPLATE.length);
 });
 
 test("local meeting dates do not shift through UTC conversion", () => {

@@ -173,6 +173,7 @@ test("precompiled local runtime serves the app and API without node_modules", as
     "local-api.mjs",
     "local-store.mjs",
     "seating-schema.mjs",
+    "meeting-plan-schema.mjs",
     "integration-api.mjs",
     "integration-provider.mjs",
   ]) {
@@ -216,6 +217,10 @@ test("precompiled local runtime serves the app and API without node_modules", as
     );
     const html = await home.text();
     assert.match(html, /会务智办/);
+    assert.doesNotMatch(html, /href="\/minutes(?:["/?])|智能纪要/);
+    for (const removedPath of ["/minutes", "/minutes/old-record", "/api/minutes", "/api/minutes/jobs", "/api/minutes/models"]) {
+      assert.equal((await request(removedPath)).status, 404, `${removedPath} must be unavailable`);
+    }
 
     const assetPaths = Array.from(
       new Set(

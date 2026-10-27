@@ -1,5 +1,7 @@
 "use client";
 
+import { useAssistantWorkspace } from "../components/use-assistant-workspace";
+import { mergeAdminConfigPatch } from "../lib/assistant-contract";
 import {
   AlertTriangle,
   BookOpen,
@@ -52,6 +54,7 @@ import {
   type UnitAliasRule,
 } from "../lib/admin-config";
 import { useAdminConfig } from "../lib/use-admin-config";
+import { adminConfigChanges } from "../lib/business-data-events";
 import {
   compactEditableLines,
   splitEditableLines,
@@ -407,6 +410,7 @@ export default function AdminPage() {
   const [draft, setDraft] = useState<AdminConfig>(() =>
     cloneAdminConfig(DEFAULT_ADMIN_CONFIG),
   );
+  const [draftBaseline, setDraftBaseline] = useState<AdminConfig>(() => cloneAdminConfig(DEFAULT_ADMIN_CONFIG));
   const [activeSection, setActiveSection] = useState<SectionId>(() => {
     const requested = searchParams.get("section");
     return requested && ADMIN_SECTIONS.some((section) => section.id === requested)
@@ -428,12 +432,22 @@ export default function AdminPage() {
   const [contactEditorBusy, setContactEditorBusy] = useState(false);
 
   const dirty = useMemo(
-    () => JSON.stringify(draft) !== JSON.stringify(config),
-    [config, draft],
+    () => JSON.stringify(draft) !== JSON.stringify(draftBaseline),
+    [draftBaseline, draft],
   );
   const editSection = isAdminEditSection(activeSection) ? activeSection : null;
-  const sectionDirty = editSection ? adminSectionDirty(config, draft, editSection) : false;
+  const sectionDirty = editSection ? adminSectionDirty(draftBaseline, draft, editSection) : false;
 
+  const assistantWorkspaceId = useAssistantWorkspace({
+    suffix: "admin", kind: "admin", label: "管理中心 · " + activeSection, dirty,
+    data: { draft, saved: config, section: activeSection, expandedTaskId, revision, configConflict },
+    editableFields: ["organization", "meetingRooms", "meetingRules", "checklistTemplates", "rosterRules"], modes: ["draft"],
+    apply: (patch) => {
+      if (saving) throw new Error("正在保存配置");
+      const next = Object.keys(patch).length ? mergeAdminConfigPatch(draft, patch) : draft;
+      setDraft(next); return "已采用到当前管理配置草稿，尚未发布";
+    },
+  });
   useWorkspaceTabStatus({
     title: "管理中心",
     dirty: dirty || contactEditorDirty,
@@ -462,19 +476,23 @@ export default function AdminPage() {
   }, [href, searchParams]);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || error) return;
+    if (loadedRevisionRef.current === revision && JSON.stringify(draftBaseline) === JSON.stringify(config)) return;
     const timer = window.setTimeout(() => {
-      if (loadedRevisionRef.current === null || !dirty) {
+      if (loadedRevisionRef.current === null || !dirty || JSON.stringify(draft) === JSON.stringify(config)) {
         setDraft(cloneAdminConfig(config));
+        setDraftBaseline(config);
         setSelectedHistoryRevision(null);
         loadedRevisionRef.current = revision;
         setConfigConflict(false);
       } else if (loadedRevisionRef.current !== revision) {
         setConfigConflict(true);
+      } else {
+        setDraftBaseline(config);
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [config, dirty, loading, revision]);
+  }, [config, dirty, draft, draftBaseline, error, loading, revision]);
   const enabledChecklistCount = draft.checklistTemplates.filter(
     (item) => item.enabled,
   ).length;
@@ -849,6 +867,7 @@ export default function AdminPage() {
       loadedRevisionRef.current = saved.revision;
       setDraft((current) => section ? replaceAdminSection(current, saved.config, section) : cloneAdminConfig(saved.config));
       setConfigConflict(false);
+      adminConfigChanges.notify();
       await reload();
       setNotice({
         tone: "success",
@@ -891,6 +910,7 @@ export default function AdminPage() {
           ),
         );
       }
+      adminConfigChanges.notify();
       await reload();
       setNotice({
         tone: "success",
@@ -963,7 +983,12 @@ export default function AdminPage() {
         className="assistant-button secondary"
         type="button"
         disabled={!dirty || saving}
-        onClick={() => setDraft(cloneAdminConfig(config))}
+        onClick={() => {
+          setDraft(cloneAdminConfig(config));
+          setDraftBaseline(config);
+          loadedRevisionRef.current = revision;
+          setConfigConflict(false);
+        }}
       >
         <RotateCcw size={15} />
         放弃全部修改
@@ -1010,7 +1035,7 @@ export default function AdminPage() {
           ) : (
             <span className={`admin-boundary-note__feedback${error || configConflict ? " is-warning" : notice?.tone === "success" ? " is-success" : ""}`} role="status" aria-live="polite">
               {configConflict
-                ? "后台配置已出现新版本。当前未发布草稿已保留；请先发布或放弃草稿，再重新读取最新配置。"
+                ? "后台配置已出现新版本。当前未发布草稿已保留；请先核对差异，或放弃草稿以采用最新配置。"
                 : error || notice?.text || "会议默认值、清单和提醒只影响以后新建的会议；名单字典与导出规则从下一次名单整理开始生效。"}
             </span>
           )}
@@ -1020,7 +1045,7 @@ export default function AdminPage() {
         </span>
       </div>
 
-      <div className="admin-layout">
+      <div data-assistant-workspace={assistantWorkspaceId} className="admin-layout">
         <aside className="admin-section-nav assistant-panel">
           <div className="admin-section-nav__heading">
             <span>ADMINISTRATION</span>

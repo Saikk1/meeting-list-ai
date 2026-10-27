@@ -408,7 +408,8 @@ export async function handleLocalMeetingsApi(request, store) {
     if (request.method === "PUT") {
       assertSameOrigin(request);
       const body = await readJsonBody(request, MAX_MEETINGS_REQUEST_BYTES);
-      assertRequestObject(body, ["meetings"]);
+      assertRequestObject(body, Object.hasOwn(body, "expectedRevision") ? ["meetings", "expectedRevision"] : ["meetings"]);
+      if (Object.hasOwn(body, "expectedRevision") && (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0)) throw new LocalConfigError("会议版本号无效");
       return jsonResponse(await store.replaceAll(body));
     }
     return methodNotAllowed(["GET", "HEAD", "PUT"]);

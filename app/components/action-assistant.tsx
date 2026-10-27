@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   Maximize2,
   Minimize2,
+  MessagesSquare,
   LockKeyhole,
   Paperclip,
   FileText,
@@ -22,6 +23,10 @@ import {
   Square,
   X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
+import { AssistantErrorBoundary } from "./assistant-error-boundary";
+import { AssistantConversationHistory } from "./assistant-conversation-history";
+import { loadConversations, saveConversations, type AssistantMessage, type SavedConversation, type ConversationStore } from "../lib/assistant-conversations";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
@@ -31,6 +36,8 @@ import {
   useMemo,
   useRef,
   useState,
+  useCallback,
+  useSyncExternalStore,
 } from "react";
 import {
   activeModelRequestConfig,
@@ -52,6 +59,9 @@ import {
   type AssistantWorkingMemory,
 } from "../lib/assistant-agent-contract";
 import { executeConfirmedPlan } from "../lib/assistant-actions";
+import { getAssistantWorkspaces, getServerAssistantWorkspaces, subscribeAssistantWorkspaces, type AssistantWorkspaceSnapshot } from "../lib/assistant-workspace";
+import { MeetingPlanPreview } from "./meeting-plan-editor";
+import { validateMeetingPlan } from "../../scripts/meeting-plan-schema.mjs";
 import { buildAssistantFullDataContext } from "../lib/assistant-data-index";
 import {
   buildAssistantOperationHistoryEntry,
@@ -96,16 +106,6 @@ import {
 type AssistantContextValue = {
   openAssistant: (message?: string) => void;
   isOpen: boolean;
-};
-
-type AssistantMessage = {
-  id: string;
-  role: "user" | "assistant" | "system";
-  text: string;
-  assumptions?: string[];
-  suggestions?: string[];
-  link?: { label: string; path: string };
-  sources?: Array<{ title: string; url: string }>;
 };
 
 type AssistantPhase =
@@ -428,6 +428,7 @@ function actionDescription(
       ? rosterWorkspace?.aliases.find((item) => item.id === action.aliasId)
       : null;
   switch (action.type) {
+    case "page.workspace.apply": return "当前业务工作区" + "；" + ({ draft: "采用到编辑区，尚未保存", save: "保存修改", download: "下载草稿", save_download: "保存并下载" })[action.mode] + "；修改字段：" + (Object.keys(action.patch).join("、") || "无新增修改");
     case "meeting.create":
       return `新建会议“${action.input.title}”（${action.input.date} ${action.input.startTime}${action.input.endTime ? `－${action.input.endTime}` : ""}，${action.input.location || "地点待定"}，${action.input.attendeeEstimate}人）`;
     case "meeting.update_fields": {
@@ -579,6 +580,7 @@ function operationPreviewRow(
   meetings: MeetingRecord[],
   contacts: ContactRecord[],
   rosterWorkspace: RosterWorkspaceSnapshot | null,
+  pageWorkspace: AssistantWorkspaceSnapshot | null = null,
 ): AssistantOperationPreviewRow {
   const raw = action as unknown as Record<string, unknown>;
   const type = String(raw.type ?? "system.action");
@@ -590,7 +592,7 @@ function operationPreviewRow(
     typeof raw.contactId === "string"
       ? contacts.find((item) => item.id === raw.contactId)
       : null;
-  const moduleLabel = type.startsWith("meeting.task")
+  const moduleLabel = type === "page.workspace.apply" ? "当前页面" : type.startsWith("meeting.task")
     ? "核对清单"
     : type.startsWith("meeting.attendee") || type.startsWith("meeting.roster")
       ? "参会名单"
@@ -604,6 +606,7 @@ function operationPreviewRow(
               ? "名单治理"
               : "系统导航";
   const operationLabels: Record<string, string> = {
+    "page.workspace.apply": "采用 / 保存 / 导出",
     "meeting.create": "新建",
     "meeting.update_fields": "修改",
     "meeting.delete": "移入回收站",
@@ -639,7 +642,7 @@ function operationPreviewRow(
     "contacts.open": "打开",
     navigate: "打开",
   };
-  const target =
+  const target = (type === "page.workspace.apply" ? pageWorkspace?.label : "") ||
     meeting?.title ||
     contact?.name ||
     (type === "contact.create" &&
@@ -690,14 +693,125 @@ function localDateOffset(days = 0) {
   }).format(value);
 }
 
+function AssistantPortal({ children }: { children: ReactNode }) {
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    const scan = () => {
+      const next = [...document.querySelectorAll<HTMLElement>('dialog[data-assistant-dialog="true"][open]')].at(-1) ?? document.body;
+      setHost((previous) => previous === next ? previous : next);
+    };
+    scan();
+    const observer = new MutationObserver(scan);
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] });
+    return () => observer.disconnect();
+  }, []);
+  return host ? createPortal(children, host) : null;
+}
+type BusinessSelection = { workspaceId: string; field: string; text: string; start: number; end: number };
+type SessionInfo = SavedConversation & { phase: AssistantPhase };
 export function ActionAssistantProvider({ children }: { children: ReactNode }) {
+  const [sessions, setSessions] = useState<SessionInfo[]>([{ id: "session-initial", title: "新会话", phase: "idle", messages: [WELCOME_MESSAGE], updatedAt: 0 }]);
+  const [activeId, setActiveId] = useState("session-initial");
+  const [mountedSessions, setMountedSessions] = useState(() => new Set(["session-initial"]));
+  const [open, setOpen] = useState(false);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [historyBlocked, setHistoryBlocked] = useState(false);
+  const [historyStatus, setHistoryStatus] = useState("正在读取本机聊天历史…");
+  const [request, setRequest] = useState<{ id: string; text: string; token: number } | null>(null);
+  const [selection, setSelection] = useState<BusinessSelection | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const result = loadConversations(window.localStorage);
+        if (result.store) {
+          setSessions(result.store.sessions.map((s) => ({ ...s, phase: "idle" })));
+          setActiveId(result.store.activeId); setOpen(result.store.open);
+          setMountedSessions(new Set([result.store.activeId]));
+        }
+        setHistoryBlocked(Boolean(result.error));
+        if (result.error) setHistoryStatus(result.error);
+      } catch {
+        setHistoryBlocked(true); setHistoryStatus("浏览器不允许保存聊天历史；当前对话仅在页面内保留。");
+      }
+      setHistoryReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const historyJson = useMemo(() => JSON.stringify({ version: 1, activeId, open, sessions: sessions.map(({ id, title, messages, updatedAt }) => ({ id, title, messages, updatedAt })) }), [activeId, open, sessions]);
+  useEffect(() => {
+    if (!historyReady || historyBlocked) return;
+    let error = "";
+    try { error = saveConversations(window.localStorage, JSON.parse(historyJson) as ConversationStore); }
+    catch { error = "浏览器不允许保存聊天历史，当前记录仍在页面中，请勿刷新。"; }
+    const timer = window.setTimeout(() => setHistoryStatus(error || "聊天记录已保存到本机，刷新后可恢复。"), 0);
+    return () => window.clearTimeout(timer);
+  }, [historyJson, historyReady, historyBlocked]);
+  useEffect(() => {
+    const capture = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".action-assistant-layer")) return;
+      const container = target.closest("[data-assistant-workspace]");
+      if (!container) return;
+      const input = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ? target : null;
+      const start = input?.selectionStart ?? 0, end = input?.selectionEnd ?? 0;
+      const next = { workspaceId: container.getAttribute("data-assistant-workspace") || "", field: target.getAttribute("data-assistant-field") || target.getAttribute("name") || target.getAttribute("data-assistant-record") || "", text: input ? input.value.slice(start, end) : window.getSelection()?.toString().slice(0, 8000) || "", start, end };
+      setSelection((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    };
+    for (const name of ["focusin", "select", "mouseup", "keyup"]) document.addEventListener(name, capture);
+    return () => { for (const name of ["focusin", "select", "mouseup", "keyup"]) document.removeEventListener(name, capture); };
+  }, []);
+  const newSession = useCallback(() => {
+    const id = makeId("session");
+    setSessions((current) => [...current, { id, title: "新会话", phase: "idle", messages: [WELCOME_MESSAGE], updatedAt: Date.now() }]);
+    setActiveId(id); setOpen(true);
+    setMountedSessions((current) => new Set([...current, id]));
+  }, []);
+  const selectSession = useCallback((id: string) => {
+    setMountedSessions((current) => current.has(id) ? current : new Set([...current, id]));
+    setActiveId(id);
+  }, []);
+  const updateSession = useCallback((id: string, patch: Partial<SessionInfo>) => {
+    setSessions((current) => {
+      const index = current.findIndex((entry) => entry.id === id);
+      if (index < 0 || !Object.entries(patch).some(([k, v]) => current[index][k as keyof SessionInfo] !== v)) return current;
+      const next = [...current];
+      const changedHistory = patch.messages !== undefined || patch.title !== undefined;
+      next[index] = { ...current[index], ...patch, updatedAt: changedHistory ? Math.max(Date.now(), current[index].updatedAt + 1) : current[index].updatedAt };
+      return next;
+    });
+  }, []);
+  const openAssistant = useCallback((message?: string) => {
+    if (message) setRequest({ id: activeId, text: message, token: Date.now() });
+    setOpen(true);
+  }, [activeId]);
+  useEffect(() => {
+    document.body.classList.toggle("assistant-docked", open);
+    return () => document.body.classList.remove("assistant-docked");
+  }, [open]);
+  const value = useMemo(() => ({ openAssistant, isOpen: open }), [openAssistant, open]);
+  return <AssistantContext.Provider value={value}>{children}{historyReady && sessions.filter((s) => mountedSessions.has(s.id)).map((session) =>
+    <AssistantErrorBoundary key={session.id} visible={open && activeId === session.id} onClose={() => setOpen(false)} onFailure={() => updateSession(session.id, { phase: "error" })}>
+    <AssistantSession sessionId={session.id} initialMessages={session.messages} historyStatus={historyStatus} open={open && activeId === session.id} setOpen={setOpen}
+      sessions={sessions} onSelect={selectSession} onNew={newSession} onUpdate={updateSession}
+      request={request?.id === session.id ? request : null} selection={selection} />
+    </AssistantErrorBoundary>
+  )}</AssistantContext.Provider>;
+}
+
+function AssistantSession({ sessionId, initialMessages, historyStatus, open, setOpen, sessions, onSelect, onNew, onUpdate, request, selection }: {
+  initialMessages: AssistantMessage[]; historyStatus: string;
+  sessionId: string; open: boolean; setOpen: (open: boolean) => void; sessions: SessionInfo[];
+  onSelect: (id: string) => void; onNew: () => void; onUpdate: (id: string, patch: Partial<SessionInfo>) => void;
+  request: { text: string; token: number } | null; selection: BusinessSelection | null;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { config: adminConfig, revision, reload: reloadAdminConfig } =
     useAdminConfig();
-  const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [conversationHistoryOpen, setConversationHistoryOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState<"auto" | "wide" | "compact">("auto");
   const [selectedPane, setSelectedPane] = useState<"auto" | "conversation" | "workspace">("auto");
   const [settings, setSettings] = useState<AISettings>(() => loadAISettings());
@@ -705,6 +819,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<AssistantPhase>("idle");
   const [plan, setPlan] = useState<AssistantPlan | null>(null);
   const [planMeetings, setPlanMeetings] = useState<MeetingRecord[]>([]);
+  const [planPageWorkspace, setPlanPageWorkspace] = useState<AssistantWorkspaceSnapshot | null>(null);
   const [planContacts, setPlanContacts] = useState<ContactRecord[]>([]);
   const [planRosterWorkspace, setPlanRosterWorkspace] =
     useState<RosterWorkspaceSnapshot | null>(null);
@@ -714,9 +829,8 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
   const [memory, setMemory] = useState<AssistantWorkingMemory>({
     ...EMPTY_ASSISTANT_WORKING_MEMORY,
   });
-  const [messages, setMessages] = useState<AssistantMessage[]>([
-    WELCOME_MESSAGE,
-  ]);
+  const [messages, setMessages] = useState<AssistantMessage[]>(() => initialMessages.length ? initialMessages : [WELCOME_MESSAGE]);
+  useEffect(() => { onUpdate(sessionId, { messages }); }, [messages, sessionId, onUpdate]);
   const [retryText, setRetryText] = useState("");
   const [documents, setDocuments] = useState<AssistantDocument[]>([]);
   const [readingDocuments, setReadingDocuments] = useState(false);
@@ -727,6 +841,21 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
+  const snapshots = useSyncExternalStore(subscribeAssistantWorkspaces, getAssistantWorkspaces, getServerAssistantWorkspaces);
+  const candidates = snapshots.filter((ws) => ws.path === pathname);
+  const workspacePriority = (ws: AssistantWorkspaceSnapshot) => ({ meeting_editor: 100, meeting_plan: 90, seating: 80, meeting_new: 70, admin: 60, roster: 50, attendees: 40 }[ws.kind] ?? 0) + (ws.editableFields.length ? 10 : 0);
+  const pageWorkspace = candidates.find((ws) => ws.id === selection?.workspaceId) ?? [...candidates].sort((a, b) => workspacePriority(b) - workspacePriority(a))[0] ?? null;
+  useEffect(() => { onUpdate(sessionId, { phase }); }, [phase, sessionId, onUpdate]);
+  useEffect(() => {
+    if (!request) return;
+    const timer = window.setTimeout(() => { setPrompt(request.text); setSettings(loadAISettings()); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [request]);
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setTimeout(() => { setSettings(loadAISettings()); setConversationHistoryOpen(false); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
   const loading = phase === "thinking";
   const executing = phase === "executing";
   const activeSetting = settings.providers[settings.activeProvider];
@@ -760,13 +889,6 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages, phase, plan]);
-
-  useEffect(() => {
-    if (!open) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previousOverflow; };
-  }, [open]);
 
   useEffect(
     () => () => {
@@ -821,18 +943,6 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const contextValue = useMemo(
-    () => ({
-      openAssistant: (message?: string) => {
-        setSettings(loadAISettings());
-        if (message) setPrompt(message);
-        setOpen(true);
-      },
-      isOpen: open,
-    }),
-    [open],
-  );
-
   function patchActiveSetting(patch: Partial<typeof activeSetting>) {
     setSettings((current) => ({
       ...current,
@@ -859,24 +969,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
     ]);
   }
 
-  function resetConversation() {
-    setSelectedPane("auto");
-    documentReadRef.current += 1;
-    setDocuments([]);
-    setReadingDocuments(false);
-    setDocumentProgress("");
-    setDocumentError("");
-    abortRef.current?.abort();
-    setMessages([{ ...WELCOME_MESSAGE, id: makeId("welcome") }]);
-    setMemory({ ...EMPTY_ASSISTANT_WORKING_MEMORY });
-    setPlan(null);
-    setCreateDraft(null);
-    setCreateDraftError("");
-    setPlanRosterWorkspace(null);
-    setPrompt("");
-    setRetryText("");
-    setPhase("idle");
-  }
+  function resetConversation() { setConversationHistoryOpen(false); onNew(); }
 
   async function contactSnapshot() {
     try {
@@ -1062,6 +1155,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
           ? `后台配置已发布${result.adminRevision === null ? "" : `为 r${result.adminRevision}`}`
           : "",
         result.rosterWorkspaceResult?.message ?? "",
+        result.workspaceMessage ?? "",
         result.navigationPath ? "页面已为你打开" : "",
         ...contactSyncMessages,
       ].filter(Boolean);
@@ -1125,12 +1219,13 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
         : "根据已添加资料创建一场会议，自动识别并填写必要信息和参会人，给我确认后录入本系统。"
       : ""))).trim();
     if (!requestText || loading || executing || readingDocuments) return;
+    if (sessions.find((entry) => entry.id === sessionId)?.title === "新会话") onUpdate(sessionId, { title: requestText.slice(0, 24) });
     const intentBoundary = detectAssistantIntentBoundary(
       requestText,
       memory.activeIntent,
     );
     const wantsCreateMeeting =
-      intentBoundary === "create_meeting" || isCreateMeetingRequest(requestText);
+      pageWorkspace?.kind !== "meeting_new" && (intentBoundary === "create_meeting" || isCreateMeetingRequest(requestText));
     let requestMemory = memory;
     if (wantsCreateMeeting) {
       const localDraft = createDraft ?? defaultMeetingDraft();
@@ -1221,6 +1316,8 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const requestWorkspace = pageWorkspace ? structuredClone(pageWorkspace) : null;
+    const requestSelection = selection?.workspaceId === requestWorkspace?.id ? structuredClone(selection) : null;
     const userMessage: AssistantMessage = {
       id: makeId("user"),
       role: "user",
@@ -1253,7 +1350,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
       const allMeetings = [...loadMeetingStoreSnapshot().all].sort((a, b) =>
         b.updatedAt.localeCompare(a.updatedAt),
       );
-      const meetingId = currentMeetingId(pathname);
+      const meetingId = requestWorkspace?.meetingId || currentMeetingId(pathname);
       const current = allMeetings.find((meeting) => meeting.id === meetingId);
       const scopedMeetings = allMeetings.slice(
         0,
@@ -1263,7 +1360,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
         scopedMeetings.push(current);
       }
       const contacts = await contactSnapshot();
-      const rosterWorkspace = pathname.startsWith("/lists")
+      const rosterWorkspace = (pathname.startsWith("/lists") || requestWorkspace?.kind === "roster")
         ? await getRosterWorkspaceSnapshot({ timeoutMs: 800 }).catch(() => null)
         : null;
       const webResearch = requestsWebResearch(requestText)
@@ -1302,15 +1399,19 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
             localDate: today,
             timezone: "Asia/Shanghai",
             page: {
-              kind: pageKind(pathname),
+              kind: requestWorkspace?.kind === "roster" ? "roster" : pageKind(pathname),
+              module: requestWorkspace?.kind ?? null,
               path: pathname,
               currentMeetingId: meetingId || null,
             },
+            pageWorkspace: requestWorkspace,
+            selection: requestSelection,
             meetings: scopedMeetings.map(meetingSummary),
             currentMeeting: current
               ? {
                   ...meetingSummary(current),
                   notes: current.notes ?? "",
+                  meetingPlan: current.meetingPlan ?? null,
                   vehicles: current.vehicles ?? [],
                   seatingPlan: current.seatingPlan ?? null,
                   attendees: current.attendees.map((attendee) => ({
@@ -1435,6 +1536,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
       setMemory(nextMemory);
       setCreateDraft(nextCreateDraft);
       setCreateDraftError(nextDraftError);
+      setPlanPageWorkspace(requestWorkspace);
       setPlanMeetings(allMeetings);
       setPlanContacts(contacts);
       setPlanRosterWorkspace(rosterWorkspace);
@@ -1443,13 +1545,13 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
         {
           id: makeId("assistant"),
           role: "assistant",
-          text: documents.length && nextCreateDraft
+          text: (requestWorkspace ? "【" + requestWorkspace.label + "】\n" : "") + (documents.length && nextCreateDraft
             ? agentResponse.reply
             : createAction
             ? createMeetingPreviewMessage(createAction.input)
             : nextCreateDraft
               ? "已为你打开一份新会议表格。可以直接填写，也可以继续用自然语言告诉我时间、地点、人数或其他要求，我会回填到同一张表里。"
-              : agentResponse.reply,
+              : agentResponse.reply),
           assumptions: nextCreateDraft && !documents.length
             ? undefined
             : agentResponse.assumptions,
@@ -1529,6 +1631,14 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
     ]);
   }
 
+  const pagePreviewAction = plan?.actions.find((a) => a.type === "page.workspace.apply");
+  let planDocumentPreview = null;
+  if (pagePreviewAction) {
+    const captured = planPageWorkspace;
+    if (captured?.kind === "meeting_plan") {
+      try { planDocumentPreview = validateMeetingPlan({ ...(captured.data.draft as object), ...pagePreviewAction.patch }); } catch { /* The actual executor rejects invalid content. */ }
+    }
+  }
   const hasWorkspace = Boolean(createDraft || plan?.actions.length);
   const wideLayout = layoutMode === "wide" || (layoutMode === "auto" && hasWorkspace);
   const activePane = selectedPane === "auto"
@@ -1536,29 +1646,27 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
     : selectedPane;
 
   return (
-    <AssistantContext.Provider value={contextValue}>
-      {children}
+    <AssistantPortal>
       {open ? (
         <div className={`action-assistant-layer${wideLayout ? " is-wide" : ""}`} role="presentation">
-          <button
-            type="button"
-            className="action-assistant-backdrop"
-            aria-label="关闭智能助手"
-            onClick={() => setOpen(false)}
-          />
           <aside
             className={`action-assistant-drawer${wideLayout ? " is-wide" : ""}${hasWorkspace ? " has-workspace" : ""}`}
             role="dialog"
-            aria-modal="true"
+            aria-modal="false"
             aria-label="会务智能助手"
           >
             <header className="action-assistant-header">
               <div>
                 <span><Sparkles /> 会务智能助手</span>
-                <strong>说清结果，系统替你办</strong>
-                <small>会议 · 清单 · 名单 · 通讯录 · 后台均可联动</small>
+                <label className="assistant-conversation-title">
+                  <select aria-label="切换 AI 会话" title="切换对话历史" value={sessionId} onChange={(e) => onSelect(e.target.value)}>
+                    {sessions.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}{entry.phase === "thinking" ? " · 生成中" : entry.phase === "awaiting_confirmation" ? " · 待确认" : ""}</option>)}
+                  </select>
+                </label>
+                <small className="assistant-current-workspace" title={pageWorkspace?.label}>正在协助：{pageWorkspace?.label ?? ({ "/": "工作台", "/meetings": "我的会议", "/meetings/new": "会议登记", "/tasks": "会务待办", "/lists": "名单治理", "/admin": "管理中心" }[pathname] || "当前页面")}</small>
               </div>
               <div>
+                <button type="button" aria-label="对话历史" title="浏览全部对话历史" aria-pressed={conversationHistoryOpen} onClick={() => { setConversationHistoryOpen((current) => !current); setHistoryOpen(false); setSettingsOpen(false); }}><MessagesSquare/></button>
                 <button
                   type="button"
                   onClick={() => setLayoutMode(wideLayout ? "compact" : "wide")}
@@ -1570,8 +1678,8 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
                 <button
                   type="button"
                   onClick={resetConversation}
-                  aria-label="开始新会话"
-                  title="开始新会话"
+                  aria-label="新建会话"
+                  title="新建会话，保留当前对话历史"
                 >
                   <RotateCcw />
                 </button>
@@ -1580,6 +1688,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
                   onClick={() => {
                     setHistoryOpen((value) => !value);
                     setSettingsOpen(false);
+                    setConversationHistoryOpen(false);
                   }}
                   aria-label="操作历史与撤销"
                   title="操作历史与撤销"
@@ -1592,6 +1701,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
                   onClick={() => {
                     setSettingsOpen((value) => !value);
                     setHistoryOpen(false);
+                    setConversationHistoryOpen(false);
                   }}
                   aria-label="助手设置"
                 >
@@ -1607,6 +1717,8 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
               </div>
             </header>
 
+            {conversationHistoryOpen && <AssistantConversationHistory sessions={sessions} activeId={sessionId} onSelect={(id) => { onSelect(id); setConversationHistoryOpen(false); }} onBack={() => setConversationHistoryOpen(false)}/>}
+            <div className="assistant-conversation-content" hidden={conversationHistoryOpen}>
             {settingsOpen ? (
               <section className="action-assistant-settings">
                 <label>
@@ -1943,6 +2055,7 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
                 </button>
               )}
               <small>支持 Word、Excel、PDF、图片及文本，每份 ≤20 MB；Enter 发送，Shift + Enter 换行。</small>
+              <small className="assistant-history-status" role="status" title={`${historyStatus} 附件与待确认草稿不随刷新恢复。`}>{historyStatus}</small>
             </form>
               </div>
             {hasWorkspace ? (
@@ -1968,8 +2081,12 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
                     onPatch={patchCreateDraft}
                     meetingRooms={adminConfig.meetingRooms}
                   />
-                ) : (
-                  <AssistantOperationPreview
+                ) : (<>
+                  {pagePreviewAction && <div className="assistant-draft-preview">
+                  <strong>{({ draft: "采用到草稿（尚未保存）", save: "保存到目标会议", download: "下载当前草稿", save_download: "保存并下载 Word" })[pagePreviewAction.mode]}</strong>
+                  {planDocumentPreview ? <><p>请核对所有待确认内容；采用到草稿后仍需保存。</p><MeetingPlanPreview plan={planDocumentPreview}/></> : <pre>{JSON.stringify(pagePreviewAction.patch, null, 2)}</pre>}
+                </div>}
+                <AssistantOperationPreview
                     rows={(plan?.actions ?? []).map((action, index) =>
                       operationPreviewRow(
                         action,
@@ -1977,10 +2094,11 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
                         planMeetings,
                         planContacts,
                         planRosterWorkspace,
+                        planPageWorkspace,
                       ),
                     )}
                   />
-                )}
+                </>)}
                 {seatingPreviews.map((preview, index) => preview.plan ? <SeatingPlanReview key={index} plan={preview.plan} /> : <div className="action-assistant-preview__error" role="alert" key={index}>{preview.error}</div>)}
                 </div>
                 {createDraftError ? (
@@ -2040,10 +2158,11 @@ export function ActionAssistantProvider({ children }: { children: ReactNode }) {
             ) : null}
 
             </div>
+            </div>
           </aside>
         </div>
       ) : null}
-    </AssistantContext.Provider>
+    </AssistantPortal>
   );
 }
 

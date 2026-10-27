@@ -7,7 +7,9 @@ import {
   useId,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
+import { contactsChanges } from "../lib/business-data-events";
 import { createPortal } from "react-dom";
 import {
   listContacts,
@@ -31,6 +33,7 @@ export function ContactAutocomplete({
 }) {
   const listId = `contact-results-${useId().replace(/:/g, "")}`;
   const requestSequence = useRef(0);
+  const contactsRevision = useSyncExternalStore(contactsChanges.subscribe, contactsChanges.getSnapshot, contactsChanges.getServerSnapshot);
   const inputRef = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<ContactRecord[]>([]);
@@ -57,7 +60,7 @@ export function ContactAutocomplete({
         signal: controller.signal,
       })
         .then((payload) => {
-          if (requestSequence.current !== sequence) return;
+          if (controller.signal.aborted || requestSequence.current !== sequence) return;
           setResults(payload.contacts);
           setActiveIndex(0);
         })
@@ -79,7 +82,7 @@ export function ContactAutocomplete({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [focused, value]);
+  }, [focused, value, contactsRevision]);
 
   const open = focused && (loading || Boolean(error) || results.length > 0);
 

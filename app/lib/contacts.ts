@@ -1,4 +1,5 @@
 import type { MeetingAttendee, MeetingRecord } from "./meeting-data";
+import { contactsChanges } from "./business-data-events";
 
 export type ContactInput = {
   name: string;
@@ -62,7 +63,11 @@ async function contactRequest<T>(url: string, init?: RequestInit) {
   if (!response.ok) {
     throw new Error(await contactApiError(response));
   }
-  return (await response.json()) as T;
+  const payload = (await response.json()) as T;
+  if (init?.method && !["GET", "HEAD"].includes(init.method.toUpperCase())) {
+    contactsChanges.notify();
+  }
+  return payload;
 }
 
 export function listContacts({

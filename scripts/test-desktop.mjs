@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createServer } from "node:net";
+import { explainDesktopLaunchFailure } from "./desktop-test-diagnostics.mjs";
 
 const executable = resolve(process.argv[2] || "release/desktop/win-unpacked/MeetingAssistant.exe");
 await mkdir(resolve(".tmp"), { recursive: true });
@@ -26,21 +27,25 @@ for (let pass = 1; pass <= 2; pass += 1) {
   let output = "";
   child.stdout.on("data", (chunk) => { output += chunk; });
   child.stderr.on("data", (chunk) => { output += chunk; });
-  await new Promise((resolveExit, rejectExit) => {
+  const exitCode = await new Promise((resolveExit, rejectExit) => {
     const timer = setTimeout(() => {
       child.kill();
       rejectExit(new Error("Desktop smoke test timed out"));
     }, 60000);
     child.once("error", (error) => { clearTimeout(timer); rejectExit(error); });
-    child.once("exit", () => { clearTimeout(timer); resolveExit(); });
+    child.once("exit", (code) => { clearTimeout(timer); resolveExit(code); });
   });
+  const logPath = join(testRoot, "数据", "desktop-logs", "desktop.log");
+  const desktopLog = await readFile(logPath, "utf8").catch(() => "");
+  const launchFailure = explainDesktopLaunchFailure(output, desktopLog);
   const report = JSON.parse(await readFile(reportPath, "utf8").catch((error) => {
-    throw new Error(`Desktop did not produce a report: ${error.message}\n${output}`);
+    throw new Error(`${launchFailure || "Desktop did not produce a report"}\nExit code: ${exitCode}\nLog: ${logPath}\n${error.message}\n${output}`);
   }));
-  assert.equal(report.ok, true, report.error);
+  assert.equal(report.ok, true, launchFailure ? `${report.error}\n${launchFailure}\nLog: ${logPath}` : report.error);
   assert.equal(report.packaged, true);
   assert.equal(report.builtinRoomCount, 6, "Packaged defaults must contain six rooms");
   assert.deepEqual(report.inputRecovery, { cancel: 3, escape: true, confirm: true, textInput: true, textarea: true }, "Input must recover after confirmations in the EXE renderer");
+  assert.deepEqual(report.assistantDraft, { turns: 2, standaloneAttendeeEditor: true, restoredConversations: true }, "Assistant drafts and conversation history must survive the relevant render/refresh flows");
   if (pass === 2) {
     assert.equal(report.restoredContact, true, "Contact was not restored after restart");
     assert.equal(report.restoredMeeting, true, "Meeting was not restored after restart");

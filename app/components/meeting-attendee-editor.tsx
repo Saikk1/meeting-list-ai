@@ -1,5 +1,7 @@
 "use client";
 
+import { useAssistantWorkspace } from "./use-assistant-workspace";
+import { workspaceAttendees } from "../lib/assistant-workspace-validation";
 import { Plus, Trash2, UserRound } from "lucide-react";
 import { useMemo } from "react";
 import type { ContactRecord } from "../lib/contacts";
@@ -10,6 +12,7 @@ import {
 } from "../lib/unit-directory";
 import { useAdminConfig } from "../lib/use-admin-config";
 import { ContactAutocomplete } from "./contact-autocomplete";
+import { MeetingAttendeeImport, type AttendeeImportStatus } from "./meeting-attendee-import";
 
 function attendeeId() {
   return `attendee-manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -51,16 +54,27 @@ export function MeetingAttendeeEditor({
   value,
   onChange,
   disabled = false,
+  onImportStatusChange,
 }: {
   value: MeetingAttendee[];
   onChange: (value: MeetingAttendee[]) => void;
   disabled?: boolean;
+  onImportStatusChange?: (status: AttendeeImportStatus) => void;
 }) {
-  const { config } = useAdminConfig();
+  const { config, loading, error } = useAdminConfig();
   const unitDirectory = useMemo(
     () => buildUnitDirectory(config.rosterRules.aliases),
     [config.rosterRules.aliases],
   );
+  const workspaceId = useAssistantWorkspace({
+    suffix: "attendee-editor", kind: "attendees", label: "当前参会人员编辑区", dirty: true,
+    data: { draft: { attendees: value } }, editableFields: ["attendees"], modes: ["draft"],
+    apply: (patch) => {
+      if (disabled) throw new Error("人员表正在保存");
+      if (patch.attendees !== undefined) onChange(workspaceAttendees(patch.attendees));
+      return "已更新当前人员表，尚未保存到会议";
+    },
+  });
   const duplicateIds = useMemo(() => duplicateAttendeeIds(value), [value]);
 
   function patchAttendee(
@@ -92,7 +106,7 @@ export function MeetingAttendeeEditor({
   }
 
   return (
-    <div className="meeting-attendee-editor">
+    <div className="meeting-attendee-editor" data-assistant-workspace={workspaceId} inert={disabled}>
       <div className="meeting-attendee-editor__toolbar">
         <div>
           <strong>参会人员</strong>
@@ -103,6 +117,9 @@ export function MeetingAttendeeEditor({
           添加一人
         </button>
       </div>
+
+      <MeetingAttendeeImport value={value} onChange={onChange} disabled={disabled}
+        config={config} configUnavailable={loading || Boolean(error)} onStatusChange={onImportStatusChange} />
 
       {value.length ? (
         <div className="meeting-attendee-editor__table-wrap">
@@ -129,7 +146,7 @@ export function MeetingAttendeeEditor({
                 const duplicate = duplicateIds.has(attendee.id);
                 return (
                   <tr
-                    key={attendee.id}
+                    data-assistant-record={attendee.id} key={attendee.id}
                     className={missingName || duplicate ? "has-error" : ""}
                   >
                     <td>
@@ -232,7 +249,7 @@ export function MeetingAttendeeEditor({
           <UserRound aria-hidden="true" />
           <span>
             <strong>暂未录入具体人员</strong>
-            <small>可以只保留预计人数，也可以在这里手动添加</small>
+            <small>可以只保留预计人数，也可手动添加或粘贴名单批量识别</small>
           </span>
           <Plus aria-hidden="true" />
         </button>

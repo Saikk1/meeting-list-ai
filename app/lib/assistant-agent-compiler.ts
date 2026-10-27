@@ -1,3 +1,4 @@
+import { validateMeetingPlan } from "../../scripts/meeting-plan-schema.mjs";
 import {
   ASSISTANT_PLAN_SCHEMA_VERSION,
   parseAssistantPlan,
@@ -17,6 +18,7 @@ import type { MeetingInput } from "./meeting-data";
 
 export type AssistantAgentCompileOptions = {
   defaultMeetingInput: MeetingInput;
+  pageWorkspace?: unknown;
   previousMemory?: AssistantWorkingMemory;
   /** The latest user message lets the deterministic host enforce intent boundaries. */
   currentMessage?: string;
@@ -54,6 +56,7 @@ export function inferExplicitAssistantIntent(
 ): AssistantWorkingMemory["activeIntent"] | null {
   const text = message?.trim();
   if (!text) return null;
+  if (/会议方案|会议背景|会议议程|编排议程|起草背景/.test(text)) return "update_meeting";
 
   if (/删除|删掉|移除|清空/.test(text)) return "delete_record";
   if (/通讯录|联系人|联系人员/.test(text)) return "manage_contacts";
@@ -254,6 +257,13 @@ export function compileAssistantAgentResponse(
       }
     : parsedResponse.memory;
   let memory = mergeAssistantWorkingMemory(previous, requestedMemory);
+  const pageActions = parsedResponse.actions.filter((a) => a.type === "page.workspace.apply");
+  for (const action of pageActions) {
+    const ws = options.pageWorkspace as { id?: string; revision?: number; editableFields?: string[]; modes?: string[]; kind?: string; data?: { draft?: object } } | null;
+    if (!ws || ws.id !== action.workspaceId || ws.revision !== action.expectedRevision || !ws.modes?.includes(action.mode) || Object.keys(action.patch).some((key) => !ws.editableFields?.includes(key))) throw new AssistantAgentValidationError("页面操作必须使用当前页面真实目标、版本及开放字段", "response.actions");
+    if (ws.kind === "meeting_plan") validateMeetingPlan({ ...ws.data?.draft, ...action.patch });
+  }
+  if (pageActions.length) memory = { ...memory, activeIntent: "update_meeting", newMeetingDraft: null };
   const defaults = validatedDefaultMeetingInput(options.defaultMeetingInput);
 
   const crossedCreateBoundary = memory.activeIntent !== "create_meeting";

@@ -1,6 +1,6 @@
 {
   "name": "meeting-list-ai",
-  "version": "3.0.4",
+  "version": "3.1.4",
   "private": true,
   "main": "desktop/main.mjs",
   "description": "会务智办桌面会议助手",
@@ -14,8 +14,9 @@
     "build": "node scripts/build.mjs",
     "start": "node scripts/local-server.mjs",
     "desktop": "electron .",
-    "desktop:build": "npm run build && node scripts/prepare-desktop.mjs && node scripts/package-desktop.mjs",
-    "test": "npm run build && node --test tests/*.test.mjs && tsx --test tests/*.test.ts",
+    "desktop:build": "npm run typecheck && npm run build && node scripts/prepare-desktop.mjs && node scripts/package-desktop.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npm run build && node --test tests/*.test.mjs && tsx --test tests/*.test.ts",
     "validate:artifact": "node scripts/build.mjs",
     "lint": "eslint app scripts tests desktop electron-builder.config.cjs --ignore-pattern dist --ignore-pattern .next"
   },

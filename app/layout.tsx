@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./meeting-assistant.css";
 import "./admin/admin.css";
+import "./experience.css";
 import {
   ActionAssistantButton,
   ActionAssistantProvider,
 } from "./components/action-assistant";
 import { WorkspaceTabsProvider } from "./components/workspace-tabs";
 import { ConfirmationDialog } from "./components/confirmation-dialog";
+import { AppFeedback } from "./components/app-feedback";
 
 export const metadata: Metadata = {
   title: "会务智办｜AI全流程会议助手",
@@ -52,6 +54,7 @@ export default function RootLayout({
           <WorkspaceTabsProvider>{children}</WorkspaceTabsProvider>
           <ActionAssistantButton floating />
           <ConfirmationDialog />
+          <AppFeedback />
         </ActionAssistantProvider>
       </body>
     </html>

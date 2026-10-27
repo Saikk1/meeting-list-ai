@@ -5,7 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { desktopDataPaths } from "./paths.mjs";
 import { createCloseConfirmation, restoreInputFocus } from "./window-focus.mjs";
-import { verifyConfirmationInput } from "./input-smoke.mjs";
+import { verifyAssistantDraft, verifyConfirmationInput } from "./input-smoke.mjs";
+import { monitorRenderer } from "./renderer-health.mjs";
 
 const smoke = process.env.MEETING_DESKTOP_SMOKE === "1";
 const paths = desktopDataPaths({
@@ -153,6 +154,7 @@ if (!hasLock) {
       webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
     });
     const localOrigin = new URL(readyUrl).origin;
+    monitorRenderer(mainWindow, { log, smoke, showRecovery: (options) => dialog.showMessageBox(mainWindow, options) });
     const openExternal = (url) => {
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     };
@@ -169,12 +171,12 @@ if (!hasLock) {
     mainWindow.on("focus", () => {
       if (!mainWindow.webContents.isDestroyed()) mainWindow.webContents.focus();
     });
-    mainWindow.webContents.on("will-prevent-unload", createCloseConfirmation(mainWindow, (window) =>
+    mainWindow.webContents.on("will-prevent-unload", smoke ? (event) => event.preventDefault() : createCloseConfirmation(mainWindow, (window) =>
       dialog.showMessageBox(window, {
         type: "question",
-        title: "有未保存的内容",
-        message: "工作区中还有未保存内容，关闭后将丢失。",
-        buttons: ["继续编辑", "放弃并关闭"],
+        title: "确认关闭软件",
+        message: "工作区还有未保存修改，关闭后将丢失。请保存后再关闭，或确认放弃修改。",
+        buttons: ["继续使用", "关闭软件"],
         defaultId: 0,
         cancelId: 0,
       }), (error) => log(`Close confirmation failed: ${error instanceof Error ? error.name : "unknown"}`)));
@@ -245,7 +247,8 @@ if (!hasLock) {
       const restoredProfile = await mainWindow.webContents.executeJavaScript("localStorage.getItem('desktop-smoke') === 'saved'");
       await mainWindow.webContents.executeJavaScript("localStorage.setItem('desktop-smoke', 'saved')");
       const inputRecovery = await verifyConfirmationInput(mainWindow, readyUrl);
-      await reportSmoke({ ok: true, checks, inputRecovery, builtinRoomCount, restoredRoom, restoredTableType, restoredContact, restoredMeeting, restoredProfile, dataDirectory: paths.root, packaged: app.isPackaged, portable: paths.portable, node: process.versions.node });
+      const assistantDraft = await verifyAssistantDraft(mainWindow);
+      await reportSmoke({ ok: true, checks, inputRecovery, assistantDraft, builtinRoomCount, restoredRoom, restoredTableType, restoredContact, restoredMeeting, restoredProfile, dataDirectory: paths.root, packaged: app.isPackaged, portable: paths.portable, node: process.versions.node });
       mainWindow.destroy();
       app.quit();
     }

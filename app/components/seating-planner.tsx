@@ -1,5 +1,7 @@
 "use client";
 
+import { useAssistantWorkspace } from "./use-assistant-workspace";
+import { validateSeatingOptions, validateSeatingPeople } from "../../scripts/seating-schema.mjs";
 import { ArrowLeftRight, Download, LockKeyhole, Plus, Redo2, Save, Search, Trash2, Undo2, UnlockKeyhole, Upload, WandSparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AdminConfig } from "../lib/admin-config";
@@ -53,11 +55,29 @@ export function SeatingPlanner({ meeting, config, onSave, onStatusChange }: {
   const locked = draft.plan?.lockedSeatIds?.includes(selectedSeatId) ?? false;
   const locks = draft.plan?.lockedSeatIds?.length ?? 0;
 
+  const workspaceId = useAssistantWorkspace({
+    suffix: "seating", kind: "seating", meetingId: meeting.id, label: meeting.title + " · 座次工作区", dirty,
+    data: { draft, rawText, selectedPersonId, selectedSeatId }, editableFields: ["participants", "options", "rawText"], modes: ["draft"],
+    apply: (patch) => {
+      if (busy) throw new Error("座次正在处理");
+      const participants = patch.participants === undefined ? draft.participants : validateSeatingPeople(patch.participants);
+      const options = patch.options === undefined ? draft.options : validateSeatingOptions(patch.options);
+      if (patch.rawText !== undefined) {
+        if (typeof patch.rawText !== "string" || patch.rawText.length > 60000) throw new Error("座次原始名单无效");
+        rawTextRef.current = patch.rawText; setRawText(patch.rawText);
+      }
+      const plan = regenerateSeatingPlan(participants, options, config.rosterRules, draft.plan);
+      commit({ ...draft, participants: plan.participants, options: plan.options, plan: { ...plan, roomId: draft.roomId } }, "AI 修改已采用，请核对后保存");
+      return "已更新当前座次草稿，尚未保存，原参会名单未修改";
+    },
+  });
+
   // Activity resumes effects, but only a clean workspace may adopt externally saved data.
   useEffect(() => {
     const signature = JSON.stringify(meeting.seatingPlan ?? null);
-    if (signature === persistedPlan.current || snapshot(latestDraft.current) !== baseline.current || busyRef.current || rawTextRef.current.trim()) return;
+    if (snapshot(fromMeeting(meeting, config)) === baseline.current || snapshot(latestDraft.current) !== baseline.current || busyRef.current || rawTextRef.current.trim()) return;
     const timer = window.setTimeout(() => {
+      if (snapshot(latestDraft.current) !== baseline.current || busyRef.current || rawTextRef.current.trim()) return;
       const next = fromMeeting(meeting, config);
       baseline.current = snapshot(next); latestDraft.current = next; persistedPlan.current = signature;
       setBaselineValue(snapshot(next)); setDraft(next); history.current = { past: [], future: [] };
@@ -65,7 +85,7 @@ export function SeatingPlanner({ meeting, config, onSave, onStatusChange }: {
       onStatusChange({ dirty: false, busy: false });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [config, meeting, onStatusChange]);
+  }, [config, meeting, onStatusChange, dirty, busy]);
 
   function commit(next: Draft, message = "", record = true) {
     if (record && snapshot(next) !== snapshot(latestDraft.current)) {
@@ -185,7 +205,7 @@ export function SeatingPlanner({ meeting, config, onSave, onStatusChange }: {
   const pageCount = Math.max(1, Math.ceil(filteredPeople.length / 6));
   const visiblePage = Math.min(personPage, pageCount - 1);
   const weight = person ? seatingWeight(person, config.rosterRules) : null;
-  return <section className="seating-panel assistant-panel">
+  return <section data-assistant-workspace={workspaceId} className="seating-panel assistant-panel">
     <header className="seating-header"><div><span>SEATING WORKSPACE</span><h2>座次工作台</h2><p>先核对人员，再生成建议；关键席位可锁定，最终由会务人员确认。</p></div>
       <div className="seating-actions">
         <button type="button" className="assistant-button secondary" disabled={busy || !ready} onClick={() => void download()}><Download size={16} />导出 Excel</button>

@@ -42,6 +42,8 @@ import { AssistantShell } from "../../components/assistant-shell";
 import { MeetingAttendeeEditor } from "../../components/meeting-attendee-editor";
 import { MeetingVehicleEditor } from "../../components/meeting-vehicle-editor";
 import { buildMeetingVehiclesXlsx, type MeetingVehicle } from "../../lib/meeting-vehicles";
+import { MeetingPlanEditor } from "../../components/meeting-plan-editor";
+import { useAssistantWorkspace } from "../../components/use-assistant-workspace";
 import { MeetingEditor } from "../../components/meeting-editor";
 import { SeatingPlanner } from "../../components/seating-planner";
 import { syncMeetingContacts } from "../../lib/contacts";
@@ -69,7 +71,7 @@ import {
   useWorkspaceTabStatus,
 } from "../../components/workspace-tabs";
 
-type MeetingTab = "overview" | "checklist" | "attendees" | "vehicles" | "seating" | "sop";
+type MeetingTab = "overview" | "checklist" | "attendees" | "vehicles" | "seating" | "plan" | "sop";
 
 const EmbeddedRosterTool = dynamic(() => import("../../lists/roster-tool"), {
   ssr: false,
@@ -172,7 +174,7 @@ export default function MeetingDetailPage() {
     (item) => item.id === meetingId && !item.deletedAt,
   ) ?? null;
   const [activeTab, setActiveTab] = useState<MeetingTab>(() =>
-    searchParams.get("tab") === "seating" ? "seating" : searchParams.get("tab") === "vehicles" ? "vehicles" : searchParams.get("tab") === "attendees" ? "attendees" : "overview",
+    searchParams.get("tab") === "plan" ? "plan" : searchParams.get("tab") === "seating" ? "seating" : searchParams.get("tab") === "vehicles" ? "vehicles" : searchParams.get("tab") === "attendees" ? "attendees" : "overview",
   );
   const [attendeeMode, setAttendeeMode] = useState<"people" | "governance">(
     () =>
@@ -187,6 +189,7 @@ export default function MeetingDetailPage() {
   const [vehicleBusy, setVehicleBusy] = useState(false);
   const [vehicleNotice, setVehicleNotice] = useState("");
   const [vehicleBaseRevision, setVehicleBaseRevision] = useState<string | null>(null);
+  const [planStatus, setPlanStatus] = useState({ dirty: false, busy: false });
   const [seatingStatus, setSeatingStatus] = useState({ dirty: false, busy: false });
   const [phaseFilter, setPhaseFilter] = useState<MeetingPhase | "all">("all");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -195,6 +198,7 @@ export default function MeetingDetailPage() {
   const [meetingEditorDirty, setMeetingEditorDirty] = useState(false);
   const [meetingEditorBusy, setMeetingEditorBusy] = useState(false);
   const [attendeeSaving, setAttendeeSaving] = useState(false);
+  const [attendeeImportStatus, setAttendeeImportStatus] = useState({ dirty: false, busy: false });
   const lastAppliedHrefRef = useRef(href);
   const [rosterWorkspaceStatus, setRosterWorkspaceStatus] = useState({
     dirty: false,
@@ -206,7 +210,7 @@ export default function MeetingDetailPage() {
     lastAppliedHrefRef.current = href;
     const requestedTab = searchParams.get("tab");
     const timer = window.setTimeout(() => {
-      if (["overview", "checklist", "attendees", "vehicles", "seating", "sop"].includes(requestedTab ?? "")) {
+      if (["overview", "checklist", "attendees", "vehicles", "seating", "plan", "sop"].includes(requestedTab ?? "")) {
         setActiveTab(requestedTab as MeetingTab);
       }
       if (requestedTab === "attendees") {
@@ -220,15 +224,17 @@ export default function MeetingDetailPage() {
 
   useWorkspaceTabStatus({
     title: meeting?.title || "会议详情",
-    dirty: attendeeDirty || vehicleDraft !== null || seatingStatus.dirty || meetingEditorDirty || rosterWorkspaceStatus.dirty,
+    dirty: planStatus.dirty || attendeeDirty || attendeeImportStatus.dirty || vehicleDraft !== null || seatingStatus.dirty || meetingEditorDirty || rosterWorkspaceStatus.dirty,
     dirtyReasons: [
+      ...(planStatus.dirty ? ["会议方案尚未保存"] : []),
       ...(attendeeDirty ? ["参会人员修改尚未保存"] : []),
+      ...(attendeeImportStatus.dirty ? ["粘贴的人员名单尚未确认添加"] : []),
       ...(vehicleDraft !== null ? ["参会车辆修改尚未保存"] : []),
       ...(seatingStatus.dirty ? ["座次名单或方案尚未保存"] : []),
       ...(meetingEditorDirty ? ["会议基本信息修改尚未保存"] : []),
       ...(rosterWorkspaceStatus.dirty ? ["正式名单治理结果尚未保存或导出"] : []),
     ],
-    busy: attendeeSaving || vehicleBusy || seatingStatus.busy || meetingEditorBusy || rosterWorkspaceStatus.busy,
+    busy: planStatus.busy || attendeeSaving || attendeeImportStatus.busy || vehicleBusy || seatingStatus.busy || meetingEditorBusy || rosterWorkspaceStatus.busy,
   });
 
   const selectedTask = useMemo(
@@ -256,6 +262,14 @@ export default function MeetingDetailPage() {
       : activeTab;
   const attendeeEditorValue =
     attendeeDraft ?? meeting?.attendees.map((attendee) => ({ ...attendee })) ?? [];
+
+  useAssistantWorkspace({
+    suffix: "meeting", label: (meeting?.title || "会议") + " · " + { overview: "总览", checklist: "流程核对", attendees: "参会人员", vehicles: "参会车辆", seating: "座次编排", plan: "会议方案", sop: "报销指引" }[displayedTab],
+    kind: displayedTab === "attendees" && attendeeMode === "governance" ? "roster" : displayedTab,
+    meetingId: meeting?.id, enabled: Boolean(meeting) && displayedTab !== "plan",
+    dirty: attendeeDirty, data: { selectedTask, attendees: attendeeEditorValue, tasks: meeting?.tasks ?? [], selectedModule: displayedTab },
+    editableFields: [], apply: () => { throw new Error("请使用当前模块开放的专用操作"); },
+  });
 
   function replaceMeeting(next: MeetingRecord) {
     try {
@@ -468,6 +482,7 @@ export default function MeetingDetailPage() {
         {([
           ["overview", "总览", Sparkles],
           ["checklist", "流程核对", ListChecks],
+          ["plan", "会议方案", FileText],
           ["attendees", "参会人员", UsersRound],
           ["vehicles", "参会车辆", Car],
           ["seating", "座次编排", ClipboardCheck],
@@ -491,6 +506,10 @@ export default function MeetingDetailPage() {
           </button>
           ))}
       </nav>
+
+      <Activity mode={displayedTab === "plan" ? "visible" : "hidden"}>
+        <MeetingPlanEditor meeting={meeting} onStatus={setPlanStatus} />
+      </Activity>
 
       {displayedTab === "overview" ? (
         <div className="meeting-overview-grid">
@@ -858,7 +877,7 @@ export default function MeetingDetailPage() {
         </section>
       ) : null}
 
-      {displayedTab === "attendees" ? (
+      {displayedTab === "attendees" || attendeeImportStatus.dirty || attendeeImportStatus.busy ? (
         attendeeMode === "governance" ? (
           <EmbeddedRosterTool
             embedded
@@ -867,7 +886,7 @@ export default function MeetingDetailPage() {
             onWorkspaceStatusChange={setRosterWorkspaceStatus}
           />
         ) : (
-        <section className="assistant-panel meeting-attendees-view">
+        <section className="assistant-panel meeting-attendees-view" hidden={displayedTab !== "attendees"}>
           <div className="assistant-panel-heading">
             <div>
               <span>{rosterEnabled ? "标准名单治理已启用" : "可选会议记录"}</span>
@@ -877,8 +896,8 @@ export default function MeetingDetailPage() {
               <button
                 className="assistant-button secondary"
                 type="button"
-                disabled={attendeeDirty}
-                title={attendeeDirty ? "请先保存人员修改" : undefined}
+                disabled={attendeeDirty || attendeeImportStatus.dirty || attendeeImportStatus.busy}
+                title={attendeeImportStatus.dirty ? "请先确认添加或清空粘贴名单" : attendeeDirty ? "请先保存人员修改" : undefined}
                 onClick={() => setAttendeeMode("governance")}
               >
               <Sparkles size={17} />
@@ -887,7 +906,7 @@ export default function MeetingDetailPage() {
               <button
                 className="assistant-button primary"
                 type="button"
-                disabled={!attendeeDirty || attendeeSaving}
+                disabled={!attendeeDirty || attendeeSaving || attendeeImportStatus.busy || attendeeImportStatus.dirty}
                 onClick={() => void saveAttendees()}
               >
                 <Check size={17} />
@@ -902,6 +921,8 @@ export default function MeetingDetailPage() {
           ) : null}
           <MeetingAttendeeEditor
             value={attendeeEditorValue}
+            disabled={attendeeSaving}
+            onImportStatusChange={setAttendeeImportStatus}
             onChange={(attendees) => {
               setAttendeeDraft(attendees);
               setAttendeeDirty(true);
@@ -1024,6 +1045,7 @@ export default function MeetingDetailPage() {
               </span>
             </div>
             <h2 id="meeting-task-title">{selectedTask.title}</h2>
+            {["prepare-meeting-plan", "print-meeting-plan"].includes(selectedTask.templateId) && <button type="button" className="assistant-button secondary" onClick={() => { setSelectedTaskId(null); setActiveTab("plan"); }}>进入会议方案</button>}
             <p className="meeting-drawer-description">
               {selectedTask.description || "按实际执行情况完成并留痕。"}
             </p>
@@ -1176,7 +1198,7 @@ export default function MeetingDetailPage() {
       ) : null}
       {editing && config ? (
         <MeetingEditor
-          key={`${meeting.id}-${meeting.updatedAt}`}
+          key={meeting.id}
           meeting={meeting}
           config={config}
           meetings={meetings}

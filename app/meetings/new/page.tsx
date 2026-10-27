@@ -19,12 +19,17 @@ import {
   RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
+import { useAssistantWorkspace } from "../../components/use-assistant-workspace";
+import { parseMeetingPatch } from "../../lib/assistant-contract";
+import { workspaceAttendees } from "../../lib/assistant-workspace-validation";
 import { FormEvent, useMemo, useState } from "react";
 import { AssistantShell } from "../../components/assistant-shell";
 import { MeetingAttendeeEditor } from "../../components/meeting-attendee-editor";
 import { MeetingVehicleEditor } from "../../components/meeting-vehicle-editor";
 import type { AdminConfig } from "../../lib/admin-config";
 import { meetingRoomRequirements } from "../../lib/builtin-meeting-rooms";
+import { focusMeetingIssue } from "../../lib/form-focus";
+import { notifySaved } from "../../components/app-feedback";
 import { syncMeetingContacts } from "../../lib/contacts";
 import {
   createMeeting,
@@ -81,8 +86,7 @@ const initialForm: MeetingInput = {
 };
 
 export default function NewMeetingPage() {
-  const { config, revision, loading, error, reload } =
-    useAdminConfig();
+  const { config, revision, loading, ready, error, reload } = useAdminConfig();
   if (loading) {
     return (
       <AssistantShell
@@ -93,19 +97,14 @@ export default function NewMeetingPage() {
       </AssistantShell>
     );
   }
-  if (error) {
+  if (error && !ready) {
     return (
-      <AssistantShell
-        title="新建会议"
-        subtitle="需要先读取管理中心的当前规则"
-      >
+      <AssistantShell title="新建会议" subtitle="需要先读取管理中心的当前规则">
         <div className="assistant-panel assistant-config-error">
           <AlertTriangle aria-hidden="true" />
           <div>
             <strong>会议配置暂时无法读取</strong>
-            <span>
-              为避免用错误的默认规则创建会议，本次操作已暂停。{error}
-            </span>
+            <span>为避免用错误的默认规则创建会议，本次操作已暂停。{error}</span>
           </div>
           <button
             className="assistant-button primary"
@@ -119,15 +118,19 @@ export default function NewMeetingPage() {
       </AssistantShell>
     );
   }
-  return <ConfiguredNewMeetingPage config={config} revision={revision} />;
+  return <ConfiguredNewMeetingPage config={config} revision={revision} configError={error} reloadConfig={reload} />;
 }
 
 function ConfiguredNewMeetingPage({
   config,
   revision,
+  configError,
+  reloadConfig,
 }: {
   config: AdminConfig;
   revision: number;
+  configError: string;
+  reloadConfig: () => Promise<unknown>;
 }) {
   const workspace = useWorkspaceTabs();
   const enabledRooms = useMemo(
@@ -137,8 +140,7 @@ function ConfiguredNewMeetingPage({
   const [form, setForm] = useState<MeetingInput>(() => {
     const defaultRoom = config.meetingRooms.find(
       (room) =>
-        room.enabled &&
-        room.id === config.organization.defaultMeetingRoomId,
+        room.enabled && room.id === config.organization.defaultMeetingRoomId,
     );
     return {
       ...initialForm,
@@ -148,8 +150,7 @@ function ConfiguredNewMeetingPage({
       startTime: config.organization.defaultStartTime,
       attendeeEstimate: config.organization.defaultAttendeeEstimate,
       roomSize: defaultRoom?.roomSize ?? config.organization.defaultRoomSize,
-      presentationRequired:
-        config.organization.defaultPresentationRequired,
+      presentationRequired: config.organization.defaultPresentationRequired,
       meetingRoomId: defaultRoom?.id,
       roomRequirements: meetingRoomRequirements(defaultRoom),
       location: defaultRoom
@@ -158,10 +159,11 @@ function ConfiguredNewMeetingPage({
     };
   });
   const [error, setError] = useState("");
-  const [selectedAttendees, setSelectedAttendees] = useState<
-    MeetingAttendee[]
-  >([]);
+  const [selectedAttendees, setSelectedAttendees] = useState<MeetingAttendee[]>(
+    [],
+  );
   const [saving, setSaving] = useState(false);
+  const [attendeeImportStatus, setAttendeeImportStatus] = useState({ dirty: false, busy: false });
   const [initialSnapshot] = useState(() =>
     JSON.stringify({ form, attendees: [] }),
   );
@@ -173,9 +175,12 @@ function ConfiguredNewMeetingPage({
   );
   useWorkspaceTabStatus({
     title: "新建会议",
-    dirty,
-    dirtyReasons: dirty ? ["新建会议信息和参会人员尚未保存"] : [],
-    busy: saving,
+    dirty: dirty || attendeeImportStatus.dirty,
+    dirtyReasons: [
+      ...(dirty ? ["新建会议信息和参会人员尚未保存"] : []),
+      ...(attendeeImportStatus.dirty ? ["粘贴的人员名单尚未确认添加"] : []),
+    ],
+    busy: saving || attendeeImportStatus.busy,
   });
   const attendeeCount = selectedAttendees.filter((attendee) =>
     [attendee.name, attendee.unit, attendee.department, attendee.title].some(
@@ -230,64 +235,56 @@ function ConfiguredNewMeetingPage({
       ...current,
       meetingRoomId: room?.id,
       roomRequirements: meetingRoomRequirements(room),
-      location: room
-        ? meetingRoomLocation(room.name, room.location)
-        : "",
+      location: room ? meetingRoomLocation(room.name, room.location) : "",
       roomSize: room?.roomSize ?? current.roomSize,
     }));
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const workspaceId = useAssistantWorkspace({
+    suffix: "registration", kind: "meeting_new", label: "会议登记 · " + (form.title || "新会议"), dirty,
+    data: { draft: { ...form, attendees: selectedAttendees }, pendingAttendeeImport: attendeeImportStatus },
+    editableFields: [...Object.keys(initialForm), "meetingRoomId", "roomRequirements", "vehicles", "attendees"], modes: ["draft", "save"],
+    apply: async (patch, mode) => {
+      if (saving) throw new Error("正在创建会议，请稍后重试");
+      const { attendees, ...fields } = patch;
+      const parsed = Object.keys(fields).length ? parseMeetingPatch(fields, "登记修改") : {};
+      const next = { ...form, ...parsed };
+      if (Object.hasOwn(parsed, "startTime") && !Object.hasOwn(parsed, "afternoonMeeting")) next.afternoonMeeting = next.startTime >= "12:00";
+      const people = attendees === undefined ? selectedAttendees : workspaceAttendees(attendees);
+      if (mode === "draft") { setForm(next); setSelectedAttendees(people); setError(""); return "已回填当前会议登记表，尚未创建会议"; }
+      setForm(next); setSelectedAttendees(people);
+      const createdMeetingId = await persistNewMeeting(next, people);
+      return { message: "会议已创建并生成配套清单", createdMeetingId };
+    },
+  });
+
+  async function persistNewMeeting(nextForm: MeetingInput, people: MeetingAttendee[]) {
+    if (configError) throw new Error("请先重新读取会议配置，当前填写内容已保留");
+    if (attendeeImportStatus.busy || attendeeImportStatus.dirty) throw new Error("请先确认添加或清空粘贴的名单");
+    const attendees = normalizeMeetingAttendees(people);
+    await ensureMeetingStoreReady();
+    const blocking = [...validateMeetingInput(nextForm), ...meetingRoomValidationIssues(nextForm, config.meetingRooms, loadAllMeetings())].filter((issue) => issue.severity === "error");
+    if (blocking.length) throw new Error(blocking.map((issue) => issue.message).join("；"));
     setSaving(true);
     try {
-      const attendees = normalizeMeetingAttendees(selectedAttendees);
-      await ensureMeetingStoreReady();
-      const issues = [
-        ...validateMeetingInput(form),
-        ...meetingRoomValidationIssues(
-          form,
-          config.meetingRooms,
-          loadAllMeetings(),
-        ),
-      ];
-      const blocking = issues.filter((issue) => issue.severity === "error");
-      if (blocking.length) {
-        setError(blocking.map((issue) => issue.message).join("；"));
-        setSaving(false);
-        return;
-      }
-      const meeting = createMeeting(
-        {
-          ...form,
-          title: form.title.trim(),
-          vehicles: form.parkingRequired ? form.vehicles ?? [] : [],
-          location: form.location.trim(),
-          organizer: form.organizer.trim(),
-          owner: form.owner.trim(),
-        },
-        {
-          ...creationOptions,
-          attendees,
-        },
-      );
-      saveMeeting(meeting);
-      await flushMeetingPersistence();
-      try {
-        await syncMeetingContacts(meeting);
-      } catch {
-        // The meeting is already saved. A later history sync in the contact
-        // directory can safely repair this non-blocking local API failure.
-      }
-      workspace.replaceActiveTab(`/meetings/${meeting.id}`, meeting.title);
-    } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : "会议未能保存，请稍后重试。",
-      );
-      setSaving(false);
+      const meeting = createMeeting({ ...nextForm, vehicles: nextForm.parkingRequired ? nextForm.vehicles ?? [] : [] }, { ...creationOptions, attendees });
+      saveMeeting(meeting); await flushMeetingPersistence();
+      await syncMeetingContacts(meeting).catch(() => null);
+      workspace.replaceActiveTab("/meetings/" + meeting.id, meeting.title);
+      notifySaved("会议已创建，保障事项已生成");
+      return meeting.id;
+    } finally { setSaving(false); }
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const blocking = formIssues.filter((issue) => issue.severity === "error");
+    if (blocking.length) {
+      setError(blocking.map((issue) => issue.message).join("；"));
+      focusMeetingIssue(event.currentTarget, blocking[0].field); return;
     }
+    try { await persistNewMeeting(form, selectedAttendees); }
+    catch (error) { setError(error instanceof Error ? error.message : "会议未能保存，请稍后重试"); }
   }
 
   return (
@@ -296,18 +293,37 @@ function ConfiguredNewMeetingPage({
       subtitle="先确认会议场景，系统只生成真正需要执行的保障事项"
       actions={
         <>
-        <Link className="assistant-button secondary" href="/meetings">
-          <ArrowLeft size={17} />
-          返回会议列表
-        </Link>
-        <button className="assistant-button primary" type="submit" form="new-meeting-form" disabled={saving}>
-          {saving ? "正在创建…" : "创建会议"}
-          <ArrowRight size={17} />
-        </button>
+          <Link className="assistant-button secondary" href="/meetings">
+            <ArrowLeft size={17} />
+            返回会议列表
+          </Link>
+          <button
+            className="assistant-button primary"
+            type="submit"
+            form="new-meeting-form"
+            disabled={saving || Boolean(configError)}
+          >
+            {saving ? "正在创建…" : "创建会议"}
+            <ArrowRight size={17} />
+          </button>
         </>
       }
     >
-      <form id="new-meeting-form" className="meeting-create-layout" onSubmit={submit}>
+      <form
+        data-assistant-workspace={workspaceId}
+        id="new-meeting-form"
+        className="meeting-create-layout"
+        onSubmit={submit}
+      >
+        {configError && <div className="meeting-form-error" role="alert">配置暂时无法更新，当前填写内容已保留。{configError}<button type="button" onClick={() => void reloadConfig()}>重新读取配置</button></div>}
+        {error && (
+          <div
+            className="meeting-form-error experience-form-error"
+            role="alert"
+          >
+            {error}
+          </div>
+        )}
         <div className="meeting-form-stack">
           <section className="assistant-panel meeting-form-section">
             <div className="meeting-section-heading">
@@ -325,6 +341,9 @@ function ConfiguredNewMeetingPage({
                 <span>会议名称 *</span>
                 <input
                   autoFocus
+                  name="title"
+                  aria-required="true"
+                  aria-invalid={!!error && !form.title.trim()}
                   value={form.title}
                   onChange={(event) => update("title", event.target.value)}
                   placeholder="例如：低空经济项目合作交流会"
@@ -334,6 +353,8 @@ function ConfiguredNewMeetingPage({
                 <span>会议日期 *</span>
                 <input
                   type="date"
+                  name="date"
+                  aria-required="true"
                   value={form.date}
                   onChange={(event) => update("date", event.target.value)}
                 />
@@ -342,6 +363,7 @@ function ConfiguredNewMeetingPage({
                 <span>开始时间</span>
                 <input
                   type="time"
+                  name="startTime"
                   value={form.startTime}
                   onChange={(event) => update("startTime", event.target.value)}
                 />
@@ -351,6 +373,7 @@ function ConfiguredNewMeetingPage({
                 <input
                   type="time"
                   value={form.endTime ?? ""}
+                  name="endTime"
                   onChange={(event) => update("endTime", event.target.value)}
                 />
               </label>
@@ -359,6 +382,7 @@ function ConfiguredNewMeetingPage({
                   <span>选择会议室</span>
                   <select
                     value={form.meetingRoomId ?? ""}
+                    name="meetingRoomId"
                     onChange={(event) => selectMeetingRoom(event.target.value)}
                   >
                     <option value="">自定义地点 / 暂不选择</option>
@@ -374,7 +398,9 @@ function ConfiguredNewMeetingPage({
               ) : null}
               <label className="meeting-field full">
                 <span>
-                  {form.meetingRoomId ? "会议地点（已从会议室带入）" : "会议地点"}
+                  {form.meetingRoomId
+                    ? "会议地点（已从会议室带入）"
+                    : "会议地点"}
                 </span>
                 <div className="meeting-input-icon">
                   <MapPin size={17} />
@@ -413,7 +439,9 @@ function ConfiguredNewMeetingPage({
                     )
                     .map((issue) => (
                       <small
-                        className={issue.severity === "error" ? "error" : "warning"}
+                        className={
+                          issue.severity === "error" ? "error" : "warning"
+                        }
                         key={`${issue.field}-${issue.message}`}
                       >
                         {issue.message}
@@ -445,6 +473,7 @@ function ConfiguredNewMeetingPage({
                     min={0}
                     max={5000}
                     type="number"
+                    name="attendeeEstimate"
                     value={form.attendeeEstimate}
                     onChange={(event) =>
                       update(
@@ -477,12 +506,14 @@ function ConfiguredNewMeetingPage({
               </span>
               <div>
                 <p>参会人员</p>
-                <h2>手动记录或从通讯录带入</h2>
+                <h2>手动、通讯录或粘贴批量录入</h2>
               </div>
             </div>
 
             <MeetingAttendeeEditor
               value={selectedAttendees}
+              disabled={saving}
+              onImportStatusChange={setAttendeeImportStatus}
               onChange={(attendees) => {
                 setSelectedAttendees(attendees);
                 setError("");
@@ -576,10 +607,7 @@ function ConfiguredNewMeetingPage({
                   form.reimbursementRequired ? "selected" : ""
                 }`}
                 onClick={() =>
-                  update(
-                    "reimbursementRequired",
-                    !form.reimbursementRequired,
-                  )
+                  update("reimbursementRequired", !form.reimbursementRequired)
                 }
               >
                 <ReceiptText size={20} />
@@ -613,10 +641,7 @@ function ConfiguredNewMeetingPage({
                   form.welcomeScreenRequired ? "selected" : ""
                 }`}
                 onClick={() =>
-                  update(
-                    "welcomeScreenRequired",
-                    !form.welcomeScreenRequired,
-                  )
+                  update("welcomeScreenRequired", !form.welcomeScreenRequired)
                 }
               >
                 <Presentation size={20} />
@@ -634,6 +659,7 @@ function ConfiguredNewMeetingPage({
                 <input
                   min={0}
                   type="number"
+                  name="vehicleCount"
                   value={form.vehicleCount}
                   onChange={(event) =>
                     update(
@@ -644,8 +670,7 @@ function ConfiguredNewMeetingPage({
                 />
                 <small
                   className={
-                    form.vehicleCount >
-                    config.meetingRules.parkingVehicleLimit
+                    form.vehicleCount > config.meetingRules.parkingVehicleLimit
                       ? "warning"
                       : undefined
                   }
@@ -656,10 +681,16 @@ function ConfiguredNewMeetingPage({
               </label>
             ) : null}
 
-            {form.parkingRequired ? <MeetingVehicleEditor value={form.vehicles ?? []} disabled={saving} onChange={(vehicles) => {
-              update("vehicles", vehicles);
-              setError("");
-            }} /> : null}
+            {form.parkingRequired ? (
+              <MeetingVehicleEditor
+                value={form.vehicles ?? []}
+                disabled={saving}
+                onChange={(vehicles) => {
+                  update("vehicles", vehicles);
+                  setError("");
+                }}
+              />
+            ) : null}
 
             <div className="meeting-subsection">
               <div>
@@ -677,10 +708,7 @@ function ConfiguredNewMeetingPage({
                     key={value}
                     className={form.mealType === value ? "active" : ""}
                     onClick={() => {
-                      update(
-                        "mealType",
-                        value as "none" | "business" | "work",
-                      );
+                      update("mealType", value as "none" | "business" | "work");
                       if (value !== "business") {
                         update("alcoholRequired", false);
                       }
@@ -730,7 +758,6 @@ function ConfiguredNewMeetingPage({
             <li>可随时调整负责人和状态</li>
             <li>操作截图挂在对应任务旁</li>
           </ul>
-          {error ? <div className="meeting-form-error">{error}</div> : null}
           <small className="meeting-local-note">
             会议信息保存在当前设备，不上传云端
           </small>

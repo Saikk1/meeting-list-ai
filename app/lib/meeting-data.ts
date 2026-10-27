@@ -1,5 +1,6 @@
 import { normalizeMeetingVehicles, type MeetingVehicle } from "./meeting-vehicles";
 import type { SeatingPlan } from "./seating";
+import type { MeetingPlan } from "./meeting-plan";
 
 export type MeetingPhase = "before" | "during" | "after";
 export type TaskStatus =
@@ -59,6 +60,8 @@ export type MeetingTask = {
   note: string;
   attachments: MeetingAttachment[];
   sopImages?: string[];
+  /** Legacy metadata retained so existing imported tasks remain readable. */
+  minutesSource?: { recordId: string; versionId: string; actionId: string; title: string };
 };
 
 export type MeetingInput = {
@@ -104,6 +107,7 @@ export type MeetingRecord = MeetingInput & {
   attendees: MeetingAttendee[];
   /** Confirmed seating snapshot, separate from the source attendee roster. */
   seatingPlan?: SeatingPlan;
+  meetingPlan?: MeetingPlan;
   templateSource?: {
     configRevision: number;
     capturedAt: string;
@@ -180,6 +184,7 @@ let hydrationPromise: Promise<void> | null = null;
 let localDirtySinceStartup = false;
 let persistenceTimer: ReturnType<typeof setTimeout> | null = null;
 let persistenceQueue: Promise<void> = Promise.resolve();
+let meetingStoreRevision: number | undefined;
 
 const APPLICATION_OVERVIEW = "/sop/kingdee-application-overview.png";
 const APPLICATION_FORM = "/sop/kingdee-application-form.png";
@@ -274,6 +279,15 @@ const BASE_CHECKLIST_TEMPLATE: Array<
     group: "场地与资料筹备",
     condition: "always",
     dueOffsetDays: -3,
+  },
+  {
+    id: "prepare-meeting-plan",
+    title: "编制并确认会议方案",
+    description: "进入会议方案，补充背景、核对人员及议程，保存定稿后手动确认完成。",
+    phase: "before",
+    group: "场地与资料筹备",
+    condition: "always",
+    dueOffsetDays: -2,
   },
   {
     id: "print-meeting-plan",
@@ -1111,6 +1125,7 @@ function normalizeStoredMeetings(value: unknown): MeetingRecord[] {
         tasks,
         attendees,
         ...(meeting.seatingPlan ? { seatingPlan: meeting.seatingPlan } : {}),
+          ...(meeting.meetingPlan ? { meetingPlan: meeting.meetingPlan } : {}),
         vehicles: migrateMeetingVehicles(meeting),
         ...(meeting.templateSource ? { templateSource: meeting.templateSource } : {}),
         ...(meeting.ruleSnapshot
@@ -1179,9 +1194,11 @@ async function persistMeetingsSnapshot(meetings: MeetingRecord[]) {
     method: "PUT",
     cache: "no-store",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ meetings }),
+    body: JSON.stringify({ meetings, ...(meetingStoreRevision === undefined ? {} : { expectedRevision: meetingStoreRevision }) }),
   });
   if (!response.ok) throw new Error(await meetingApiError(response));
+  const saved = (await response.json()) as { revision?: number };
+  meetingStoreRevision = saved.revision;
   browserStorage()?.setItem(MEETING_MIGRATION_KEY, "1");
 }
 
@@ -1225,7 +1242,8 @@ async function hydrateMeetingsFromFile() {
   initializeBrowserMeetingCache();
   const response = await fetch("/api/meetings", { cache: "no-store" });
   if (!response.ok) throw new Error(await meetingApiError(response));
-  const payload = (await response.json()) as { meetings?: unknown };
+  const payload = (await response.json()) as { meetings?: unknown; revision?: number };
+  meetingStoreRevision = payload.revision;
   const remoteMeetings = normalizeStoredMeetings(payload.meetings);
   const storage = browserStorage();
   const alreadyMigrated = storage?.getItem(MEETING_MIGRATION_KEY) === "1";
@@ -1247,6 +1265,26 @@ export function ensureMeetingStoreReady() {
     });
   }
   return hydrationPromise;
+}
+
+export async function refreshMeetingStoreFromFile() {
+  await flushMeetingPersistence();
+  const response = await fetch("/api/meetings", { cache: "no-store" });
+  if (!response.ok) throw new Error(await meetingApiError(response));
+  const payload = await response.json() as { meetings: unknown; revision: number };
+  meetingStoreRevision = payload.revision;
+  publishMeetingStore(normalizeStoredMeetings(payload.meetings));
+  return payload.revision;
+}
+
+export async function acceptMeetingServerSnapshot() {
+  // Call only after flushing local edits and successfully importing on the server.
+  const response = await fetch("/api/meetings", { cache: "no-store" });
+  if (!response.ok) throw new Error(await meetingApiError(response));
+  const payload = await response.json() as { meetings: unknown; revision: number };
+  meetingStoreRevision = payload.revision;
+  publishMeetingStore(normalizeStoredMeetings(payload.meetings));
+  localDirtySinceStartup = false;
 }
 
 export function loadMeetingStoreSnapshot() {

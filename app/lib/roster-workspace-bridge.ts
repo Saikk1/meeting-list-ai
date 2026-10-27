@@ -4,7 +4,7 @@ export type RosterWorkspaceFileValue = {
   name: string;
   size: number;
   lastModified: number;
-  kind: "excel" | "word" | "text";
+  kind: "excel" | "word" | "text" | "pdf" | "image";
 };
 
 export type RosterWorkspaceRecordValue = {
@@ -464,7 +464,7 @@ function parseSnapshot(value: unknown): RosterWorkspaceSnapshot {
   if (!Array.isArray(object.files) || object.files.length > 100) {
     bridgeError(code, "snapshot.files 必须是最多 100 项的数组");
   }
-  const files = object.files.map((file, index) => {
+  const files = object.files.map((file, index): RosterWorkspaceFileValue => {
     const path = `snapshot.files[${index}]`;
     const item = plainObject(file, path, code);
     exactKeys(item, ["name", "size", "lastModified", "kind"], path, code);
@@ -472,7 +472,7 @@ function parseSnapshot(value: unknown): RosterWorkspaceSnapshot {
       minimum: 1,
       maximum: 20,
     });
-    if (kind !== "excel" && kind !== "word" && kind !== "text") {
+    if (kind !== "excel" && kind !== "word" && kind !== "text" && kind !== "pdf" && kind !== "image") {
       bridgeError(code, `${path}.kind 不受支持`);
     }
     return {
