@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>会务智办 · 软件更新</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">会务智办 · 软件更新</p>
+    <h1 id="title">检查软件更新</h1>
+    <p id="versions"></p>
+    <p id="status" role="status" aria-live="polite">正在读取更新状态…</p>
+    <progress id="progress" max="100" value="0" aria-label="安装包下载进度" hidden></progress>
+    <p id="error" role="alert" hidden></p>
+    <section id="release" hidden><h2>更新说明</h2><pre id="notes"></pre></section>
+    <p class="hint">下载期间可以继续工作。安装前请保存修改；取消退出后仍可继续使用。</p>
+    <div class="actions">
+      <button id="primary" type="button" disabled>检查更新</button>
+      <button id="cancel" class="secondary" type="button" hidden>取消下载</button>
+      <button id="releases" class="secondary" type="button">打开发布页</button>
+    </div>
+  </main>
+</body>
+</html>

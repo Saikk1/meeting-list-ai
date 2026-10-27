@@ -4,7 +4,7 @@ module.exports = {
   electronVersion: "44.4.5",
   electronDownload: { cache: `${process.cwd()}/.tmp/desktop-cache/electron` },
   directories: { app: "desktop", output: "release/desktop", buildResources: "build/desktop" },
-  files: ["main.mjs", "paths.mjs", "window-focus.mjs", "renderer-health.mjs", "input-smoke.mjs", "package.json", "!node_modules/**/*"],
+  files: ["main.mjs", "paths.mjs", "window-focus.mjs", "renderer-health.mjs", "input-smoke.mjs", "updates.mjs", "update-window.mjs", "update-preload.cjs", "update-ui/**/*", "package.json", "!node_modules/**/*"],
   extraResources: [
     { from: "dist", to: "runtime/dist", filter: ["**/*", "!.openai/**/*"] },
     {

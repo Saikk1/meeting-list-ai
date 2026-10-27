@@ -100,7 +100,7 @@ node scripts/test-desktop.mjs
 
 桌面验证必须实际启动沙箱化渲染器并完成两次测试，不能以 HTTP 检查替代。受限自动执行账户可能报 GPU 子进程 `0xC0000135` 或渲染器 `launch-failed/49`；后者表示无法创建 Chromium 所需受限令牌。诊断脚本会给出日志路径和正常 Windows 用户终端的验证指引，仍以失败退出，不跳过断言、不关闭渲染沙箱。临时软件渲染诊断不进入发行配置。
 
-当前源码输出在 `release/desktop/`，安装程序为 `会务智办-3.1.4-安装版.exe`，不提交 Git；正式发布时命名 `MeetingAssistant-3.1.4-Setup.exe`。历史发布保持不变。配置和命令均只选择 NSIS，回归测试禁止重新加入便携目标。旧便携包可能仍保留在本机忽略目录中，不代表新版本分发内容。Windows x64 构建和桌面验证应在 Windows 上执行；未配置签名证书时不得标称已签名。
+当前源码输出在 `release/desktop/`，安装程序为 `会务智办-3.1.5-安装版.exe`，不提交 Git；正式发布时命名 `MeetingAssistant-3.1.5-Setup.exe`。历史发布保持不变。配置和命令均只选择 NSIS，回归测试禁止重新加入便携目标。旧便携包可能仍保留在本机忽略目录中，不代表新版本分发内容。Windows x64 构建和桌面验证应在 Windows 上执行；未配置签名证书时不得标称已签名。
 
 根 `package.json`、锁文件根版本、`desktop/package.json` 三处版本保持一致。更改版本时同步说明及测试命令里的 EXE 名称。发布步骤见 [发布记录](releases.md#发布验证)。
 
@@ -116,6 +116,18 @@ node scripts/test-desktop.mjs
 - AI 会话独立保留对话；模型设置共用。同一次会话跟随当前业务页面，附件、未保存草稿、待确认操作及请求状态不跨刷新恢复；聊天历史的持久化规则见下一项。
 - `assistant-conversations.ts` 将聊天记录白名单保存到浏览器 localStorage 的 `meeting-list-ai:assistant-conversations:v1`，恢复会话列表、标题和当前选择；不持久化附件、草稿、API 配置、执行计划和生成状态。此项更新替代此前 AI 会话仅在内存保留的规则，业务工作区草稿仍不跨刷新恢复。恢复的历史会话按需挂载，避免一次打开所有历史助手。
 - `assistant-error-boundary.tsx` 隔离单个助手会话的渲染异常；`desktop/renderer-health.mjs` 记录技术诊断标记及渲染进程退出原因。日志不收集普通控制台内容、提示词、模型回复或密钥；重新加载及重建会话均需用户明确操作。
+
+## 桌面版本更新
+
+`desktop/updates.mjs` 使用 Electron `net.fetch` 读取公开仓库 `Saikk1/meeting-list-ai` 的 GitHub Releases latest API。匿名 API 限流时改用公开 latest 发布页的最终 tag 地址、同版 `SHA256SUMS-版本.txt` 与安装包 HEAD 大小。只接受更高的三段正式版本、精确的 `MeetingAssistant-版本-Setup.exe` 资产名与本仓库下载地址，拒绝草稿、预发布、缺少 SHA-256 或超出 512 MB 的安装包。检查网络请求超时 15 秒，下载总超时 10 分钟；不发送业务数据、API Key 或 GitHub 令牌。
+
+下载暂存于业务目录下独立的 `desktop-updates/`，校验字节数和 SHA-256 后才改名为缓存 EXE；取消/失败清理本次 partial 文件。安装请求及进程交接时重新校验。更新窗口使用独立沙箱、CSP、CommonJS preload 和受限 IPC，只接受该窗口主 frame 的请求，业务网页无更新进程权限。源码运行、历史便携版不自动更新；烟雾模式使用虚构更新源，不联网、不运行安装程序。
+
+点击安装后走现有 `beforeunload` 及异步确认；取消或确认失败立即清除安装请求。只有主窗口允许关闭、后台退出后，才启动当前目录的 NSIS 更新（`/S --updated --force-run /D=当前安装目录`）。无自动退出安装或下次启动强制安装。下载不修改业务数据，安装仍使用保留数据的既有 NSIS 配置。
+
+`desktop/update-window.mjs` 与 `desktop/update-ui/` 负责更新窗口，`desktop/update-preload.cjs` 只提供固定状态/操作消息；所有文件必须包含在 Electron asar。`tests/desktop-updates.test.mjs` 验证发布边界、网络/取消/损坏、缓存及安装交接和 IPC 隔离。`scripts/test-desktop.mjs` 实际启动打包更新窗口，验证 preload、IPC、检测与下载；不替换用户安装。
+
+正式发布在桌面构建和验证后运行 `npm run release:prepare`，生成英文安装包与校验文件。GitHub Release 必须为正式版并设为 Latest，安装包名、tag 与版本严格对应。更新器使用 GitHub 自动提供的资产 digest，无需另放 `latest.yml` 或第三方更新服务器。历史版本不覆盖；自动更新从 3.1.5 首次安装后生效。
 
 ## 不上传的文件
 

@@ -1,12 +1,15 @@
-import { app, BrowserWindow, dialog, Menu, shell, utilityProcess } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, shell, utilityProcess } from "electron";
 import { mkdir, writeFile } from "node:fs/promises";
 import { appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { desktopDataPaths } from "./paths.mjs";
 import { createCloseConfirmation, restoreInputFocus } from "./window-focus.mjs";
 import { verifyAssistantDraft, verifyConfirmationInput } from "./input-smoke.mjs";
 import { monitorRenderer } from "./renderer-health.mjs";
+import { DesktopUpdates, launchUpdateInstaller, RELEASES_URL } from "./updates.mjs";
+import { createUpdateWindow } from "./update-window.mjs";
 
 const smoke = process.env.MEETING_DESKTOP_SMOKE === "1";
 const paths = desktopDataPaths({
@@ -24,6 +27,19 @@ let backend;
 let quitting = false;
 let forceQuit = false;
 let readyUrl = "";
+let updates;
+let updateWindow;
+let pendingInstaller;
+let updateTimer;
+
+async function showUpdates() {
+  if (!app.isPackaged || process.platform !== "win32" || paths.portable) {
+    await dialog.showMessageBox(mainWindow, { type: "info", title: "软件更新", message: "自动更新适用于 Windows 安装版。请到 GitHub 发布页下载安装版。" });
+    return;
+  }
+  await updateWindow.show();
+  if (updates.snapshot().status === "idle") await updates.check();
+}
 
 function log(message) {
   appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
@@ -82,10 +98,33 @@ if (!hasLock) {
     }
   });
   app.on("window-all-closed", () => app.quit());
+  app.on("will-quit", (event) => {
+    if (!pendingInstaller) return;
+    event.preventDefault();
+    const installer = pendingInstaller;
+    pendingInstaller = null;
+    // Reached only after the main window allowed unload and the backend stopped.
+    void launchUpdateInstaller(installer, dirname(process.execPath)).catch(() => {
+      dialog.showErrorBox("更新未能启动", "安装包校验失败或无法运行，请重新打开软件下载更新，或从 GitHub 发布页手动安装。");
+    }).finally(() => { forceQuit = true; app.quit(); });
+  });
 
   void app.whenReady().then(async () => {
+  const fixture = Buffer.from("MZ isolated updater smoke fixture; not an executable");
+  const nextVersion = app.getVersion().split(".").map((part, index) => index === 2 ? Number(part) + 1 : part).join(".");
+  updates = new DesktopUpdates({ currentVersion: app.getVersion(), cacheDirectory: join(paths.root, "desktop-updates"),
+    // Smoke mode exercises IPC/UI with a deterministic feed, never the public network.
+    fetchImpl: smoke ? async (url) => url.endsWith("/latest") ? Response.json({ tag_name: `v${nextVersion}`, draft: false, prerelease: false,
+      body: "独立测试数据：验证版本检测、下载进度和安装包校验。本次测试不会执行安装程序。", assets: [{ name: `MeetingAssistant-${nextVersion}-Setup.exe`, state: "uploaded", size: fixture.length,
+        digest: `sha256:${createHash("sha256").update(fixture).digest("hex")}`, browser_download_url: `${RELEASES_URL}/download/v${nextVersion}/MeetingAssistant-${nextVersion}-Setup.exe` }] }) : new Response(fixture)
+      : (url, options) => net.fetch(url, options) });
+  updateWindow = createUpdateWindow({ BrowserWindow, ipcMain, service: updates, getParent: () => mainWindow,
+    onInstall: (installer) => { if (!smoke) { pendingInstaller = installer; app.quit(); } },
+    openReleases: () => void shell.openExternal(RELEASES_URL) });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: "会务智办", submenu: [
+      { label: `软件更新（当前 ${app.getVersion()}）…`, click: () => { void showUpdates().catch(() => log("Update window unavailable")); } },
+      { type: "separator" },
       { label: "打开数据文件夹", click: () => void shell.openPath(paths.root) },
       { label: "打开运行日志", click: () => void shell.openPath(paths.logs) },
       { type: "separator" },
@@ -179,13 +218,28 @@ if (!hasLock) {
         buttons: ["继续使用", "关闭软件"],
         defaultId: 0,
         cancelId: 0,
-      }), (error) => log(`Close confirmation failed: ${error instanceof Error ? error.name : "unknown"}`)));
-    mainWindow.on("closed", () => { mainWindow = undefined; });
+      }), (error) => log(`Close confirmation failed: ${error instanceof Error ? error.name : "unknown"}`), () => {
+        pendingInstaller = null;
+        updates.cancelInstall();
+      }));
+    mainWindow.on("closed", () => {
+      clearInterval(updateTimer);
+      mainWindow = undefined;
+      updateWindow.destroy();
+    });
     mainWindow.once("ready-to-show", () => {
       if (!smoke) mainWindow.show();
     });
     await mainWindow.loadURL(readyUrl);
     log(`Ready (${paths.portable ? "portable" : "installed"})`);
+
+    if (!smoke && app.isPackaged && process.platform === "win32" && !paths.portable) {
+      const check = () => { void updateWindow.checkInBackground().catch(() => log("Update check unavailable")); };
+      updateTimer = setInterval(check, 6 * 60 * 60 * 1000);
+      updateTimer.unref();
+      const startupCheck = setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) check(); }, 10000);
+      startupCheck.unref();
+    }
 
     if (smoke) {
       const checks = {};
@@ -248,7 +302,12 @@ if (!hasLock) {
       await mainWindow.webContents.executeJavaScript("localStorage.setItem('desktop-smoke', 'saved')");
       const inputRecovery = await verifyConfirmationInput(mainWindow, readyUrl);
       const assistantDraft = await verifyAssistantDraft(mainWindow);
-      await reportSmoke({ ok: true, checks, inputRecovery, assistantDraft, builtinRoomCount, restoredRoom, restoredTableType, restoredContact, restoredMeeting, restoredProfile, dataDirectory: paths.root, packaged: app.isPackaged, portable: paths.portable, node: process.versions.node });
+      const updateView = await updateWindow.show();
+      await updateView.webContents.executeJavaScript("window.meetingUpdates.action('check')");
+      await updateView.webContents.executeJavaScript("window.meetingUpdates.action('download')");
+      const updaterUi = await updateView.webContents.executeJavaScript("new Promise((resolve, reject) => { const deadline = Date.now() + 5000; const timer = setInterval(() => { if (document.querySelector('#title').textContent === '更新已准备好' && document.querySelector('#primary').textContent === '退出并安装') { clearInterval(timer); resolve(true); } else if (Date.now() > deadline) { clearInterval(timer); reject(new Error('Update UI did not receive IPC state')); } }, 25); })");
+      await writeFile(join(dirname(process.env.MEETING_DESKTOP_REPORT), "update-window.png"), (await updateView.webContents.capturePage()).toPNG());
+      await reportSmoke({ ok: true, checks, inputRecovery, assistantDraft, updaterUi, builtinRoomCount, restoredRoom, restoredTableType, restoredContact, restoredMeeting, restoredProfile, dataDirectory: paths.root, packaged: app.isPackaged, portable: paths.portable, node: process.versions.node });
       mainWindow.destroy();
       app.quit();
     }

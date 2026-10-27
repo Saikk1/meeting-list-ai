@@ -69,7 +69,7 @@ def decorate(canvas, doc):
         canvas.setFont("ManualCN", 8.5)
         canvas.setFillColor(MUTED)
         canvas.drawString(MARGIN, HEIGHT - 28, "会务智办  |  图文操作手册")
-        canvas.drawRightString(WIDTH - MARGIN, HEIGHT - 28, "3.1.4")
+        canvas.drawRightString(WIDTH - MARGIN, HEIGHT - 28, "3.1.5")
         canvas.setStrokeColor(colors.HexColor("#D9E4EE"))
         canvas.line(MARGIN, HEIGHT - 35, WIDTH - MARGIN, HEIGHT - 35)
     canvas.setFillColor(MUTED)
@@ -97,7 +97,7 @@ def build(output, font):
     raw = SOURCE.read_text(encoding="utf-8")
     parts = re.split(r"^## (.+)$", raw, flags=re.M)
     doc = ManualDoc(str(output), pagesize=A4, leftMargin=MARGIN, rightMargin=MARGIN,
-                    topMargin=51, bottomMargin=43, title="会务智办操作手册 3.1.4",
+                    topMargin=51, bottomMargin=43, title="会务智办操作手册 3.1.5",
                     author="会务智办", pageCompression=1)
     doc.addPageTemplates([PageTemplate(id="Manual", frames=Frame(
         MARGIN, 43, CONTENT_WIDTH, HEIGHT - 94, leftPadding=0, rightPadding=0,
@@ -222,7 +222,7 @@ def build_word(output):
             element.getparent().remove(element)
     properties = document.core_properties
     properties.title = "会务智办操作手册"
-    properties.subject = "3.1.4 会务与座次工作台 图文操作步骤"
+    properties.subject = "3.1.5 会务与座次工作台 图文操作步骤"
     properties.author = "会务智办"
     properties.last_modified_by = "会务智办"
 
@@ -237,7 +237,7 @@ def build_word(output):
     parts = re.split(r"^## (.+)$", SOURCE.read_text(encoding="utf-8"), flags=re.M)
     document.add_paragraph("会务智办操作手册", "Title")
     document.add_paragraph("会议安排  人员名单  车辆登记  座次编排  会务跟进")
-    document.add_paragraph("3.1.4    更新日期 2026-10-27")
+    document.add_paragraph("3.1.5    更新日期 2026-10-27")
     for paragraph in parts[0].split("\n\n")[2:]:
         if paragraph.strip():
             text(document.add_paragraph(), paragraph.replace("\n", " "))

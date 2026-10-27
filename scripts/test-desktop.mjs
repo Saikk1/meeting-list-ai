@@ -43,6 +43,7 @@ for (let pass = 1; pass <= 2; pass += 1) {
   }));
   assert.equal(report.ok, true, launchFailure ? `${report.error}\n${launchFailure}\nLog: ${logPath}` : report.error);
   assert.equal(report.packaged, true);
+  assert.equal(report.updaterUi, true, "Packaged update window must load its sandboxed preload and receive IPC state");
   assert.equal(report.builtinRoomCount, 6, "Packaged defaults must contain six rooms");
   assert.deepEqual(report.inputRecovery, { cancel: 3, escape: true, confirm: true, textInput: true, textarea: true }, "Input must recover after confirmations in the EXE renderer");
   assert.deepEqual(report.assistantDraft, { turns: 2, standaloneAttendeeEditor: true, restoredConversations: true }, "Assistant drafts and conversation history must survive the relevant render/refresh flows");

@@ -9,6 +9,7 @@
 - `scripts/local-server.mjs`：仅回环地址的运行器。
 - `scripts/local-api.mjs`、`scripts/local-store.mjs`：会议、通讯录和配置 API / 原子文件存储。
 - `desktop/` 与 `electron-builder.config.cjs`：桌面入口和 Windows 安装包；从 3.0.4 正式发布起只构建 NSIS 安装版，不再提供便携版。
+- 3.1.5 起 `desktop/updates.mjs` 从公开 GitHub Release 检查和下载更新；更新窗口及 preload 为独立沙箱，只在用户确认且未保存检查通过后安装。发布资产使用 `npm run release:prepare` 生成英文名称和 SHA-256，不嵌入 GitHub 令牌。
 - `tests/`：Node 和 TypeScript 自动测试。
 - 用户说明见 `docs/user-guide.md`；运行与目录职责见 `docs/development.md`。
 - 图文操作步骤见 `docs/operation-manual.md`，截图位于 `docs/images/`；Word 与 PDF 位于 `docs/downloads/`。界面或保存规则变化时同时核对在线版和下载版，不把旧截图当作当前功能证据。

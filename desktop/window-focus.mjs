@@ -8,7 +8,7 @@ export function restoreInputFocus(window) {
   if (!window.webContents.isDestroyed()) window.webContents.focus();
 }
 
-export function createCloseConfirmation(window, ask, reportError = () => {}) {
+export function createCloseConfirmation(window, ask, reportError = () => {}, onCancel = () => {}) {
   let pending = false;
   let discardApproved = false;
   return (event) => {
@@ -25,10 +25,12 @@ export function createCloseConfirmation(window, ask, reportError = () => {}) {
         discardApproved = true;
         window.close();
       } else {
+        onCancel();
         restoreInputFocus(window);
       }
     }).catch((error) => {
       reportError(error);
+      onCancel();
       restoreInputFocus(window);
     }).finally(() => { pending = false; });
   };
